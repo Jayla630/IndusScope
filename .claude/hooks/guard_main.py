@@ -20,6 +20,7 @@ Usage (manual test):
 """
 
 import json
+import os
 import re
 import sys
 
@@ -29,15 +30,20 @@ import sys
 # ---------------------------------------------------------------------------
 
 def is_under(path: str, dirs: tuple[str, ...]) -> bool:
-    """True if *path* lives under one of the given top-level directories."""
+    """True if *path* lives under one of the given top-level directories.
+
+    Handles both absolute paths (C:\\...\\core\\src\\foo.cpp) and relative
+    paths (core/src/foo.cpp) by checking every path component pair: if the
+    directory name appears and is followed by another component (meaning the
+    file is INSIDE, not just AT the directory), return True.
+    """
     norm = path.replace("\\", "/")
+    parts = [p for p in norm.split("/") if p]  # strip empty segments
     for d in dirs:
-        prefix = d.rstrip("/") + "/"
-        if norm.startswith(prefix):
-            return True
-        # Also match exact directory name (e.g. a bare "core")
-        if norm == d.rstrip("/"):
-            return True
+        d_clean = d.rstrip("/")
+        for i, part in enumerate(parts):
+            if part == d_clean and i < len(parts) - 1:
+                return True
     return False
 
 
