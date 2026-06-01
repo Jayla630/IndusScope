@@ -110,5 +110,9 @@ ui_*.h
 .DS_Store
 Thumbs.db
 
-.idea/
-docs/
+# --- 本地开发脚手架(AI 工单/图纸),不进公共仓库 ---
+/CLAUDE.md
+/SPEC.md
+/ROADMAP.md
+/README_draft.md
+/docs/Tasks/
