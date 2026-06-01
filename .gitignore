@@ -67,3 +67,48 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+
+# ---- Build ----
+build/
+build-*/
+cmake-build-*/
+out/
+CMakeCache.txt
+CMakeFiles/
+*.cmake.stamp
+
+# ---- C/C++ 产物 ----
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+
+# ---- Qt ----
+*.pro.user
+*.qmlc
+*.jsc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.autosave
+
+# ---- IDE ----
+.vs/
+.vscode/
+.idea/          # CLion / JetBrains
+*.suo
+*.user
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+
+.idea/
+docs/
