@@ -102,7 +102,9 @@ ui_*.h
 # ---- IDE ----
 .vs/
 .vscode/
-.idea/          # CLion / JetBrains
+
+# CLion / JetBrains
+.idea/         
 *.suo
 *.user
 
