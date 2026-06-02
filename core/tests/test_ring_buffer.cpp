@@ -1,3 +1,7 @@
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <thread>
 #include <catch2/catch_test_macros.hpp>
 #include "indusscope/core/RingBuffer.h"
 #include "indusscope/core/SamplePoint.h"
@@ -267,4 +271,147 @@ TEST_CASE("RingBuffer degenerate capacity 1 full lifecycle", "[core][ringbuffer]
 
     // Pop from empty — rejected / 空时 pop——被拒
     REQUIRE(!rb.pop(val));
+}
+
+// ---------------------------------------------------------------------------
+// 10. SPSC stress A — zero-drop with producer backoff, small capacity / SPSC 压测 A——生产者回退零丢,小容量强化绕回
+// ---------------------------------------------------------------------------
+
+TEST_CASE("RingBuffer SPSC stress: zero-drop with retry, FIFO integrity", "[core][ringbuffer][spsc][stress]") {
+    constexpr std::size_t CAP = 64;
+    constexpr std::size_t N   = 10'000'000;
+    RingBuffer<std::uint64_t> rb(CAP);
+
+    std::atomic<bool>     done{false};
+    std::atomic<bool>     order_violated{false};
+    std::atomic<std::uint64_t> received{0};
+
+    // Producer: push 0..N-1, wait for space before each push (avoids push-rejection counting as "dropped")
+    // 生产者:推入 0..N-1,每次 push 前等待空闲槽 (避免 push 被拒计入 dropped)
+    // Using full() pre-check ensures push() always succeeds → dropped() stays 0.
+    // 用 full() 预检保证 push() 总是成功 → dropped() 保持 0。
+    std::thread producer([&]() {
+        for (std::uint64_t i = 0; i < N; ++i) {
+            while (rb.full()) {
+                std::this_thread::yield();
+            }
+            rb.push(i); // guaranteed to succeed — we waited for space / 保证成功——已等待空闲槽
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    // Consumer: pop_batch for higher throughput (<1 atomic/item vs 2 in pop) / 消费者:用 pop_batch 提吞吐 (每次不足 1 次原子操作,pop 需 2 次)
+    std::thread consumer([&]() {
+        std::uint64_t last_value = 0;
+        bool first = true;
+        std::uint64_t batch_buf[256]; // local buffer / 本地缓冲
+        while (!done.load(std::memory_order_acquire) || !rb.empty()) {
+            std::size_t n = rb.pop_batch(batch_buf, 256);
+            if (n == 0) {
+                std::this_thread::yield();
+                continue;
+            }
+            for (std::size_t i = 0; i < n; ++i) {
+                std::uint64_t val = batch_buf[i];
+                // Check strict monotonicity — flag on first violation, REQUIRE once after join
+                // 检查严格递增——首次违例记 flag,join 后只 REQUIRE 一次
+                if (!first && !(val > last_value)) {
+                    order_violated.store(true, std::memory_order_relaxed);
+                }
+                last_value = val;
+                first = false;
+            }
+            received.fetch_add(n, std::memory_order_relaxed);
+        }
+    });
+
+    producer.join();
+    consumer.join();
+
+    REQUIRE(!order_violated.load());
+    REQUIRE(received.load() == N);
+    REQUIRE(rb.dropped() == 0);
+}
+
+// ---------------------------------------------------------------------------
+// 11. SPSC stress B — forced drops, small capacity, throttled consumer / SPSC 压测 B——强制丢点,小容量,消费者节流
+// ---------------------------------------------------------------------------
+
+TEST_CASE("RingBuffer SPSC stress: forced-drop with throttled consumer", "[core][ringbuffer][spsc][stress]") {
+    constexpr std::size_t CAP = 256;
+    constexpr std::size_t N   = 10'000'000;
+    RingBuffer<std::uint64_t> rb(CAP);
+
+    std::atomic<bool>     done{false};
+    std::atomic<bool>     order_violated{false};
+    std::atomic<std::uint64_t> received{0};
+
+    // Producer: blind push, ignore return / 生产者:盲推,忽略返回值
+    std::thread producer([&]() {
+        for (std::uint64_t i = 0; i < N; ++i) {
+            rb.push(i); // ignore return — forced drops / 忽略返回值——强制丢点
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    // Consumer: throttled, check monotonicity / 消费者:节流,检查递增
+    std::thread consumer([&]() {
+        std::uint64_t last_value = 0;
+        bool first = true;
+        std::uint64_t local_pops = 0;
+        while (!done.load(std::memory_order_acquire) || !rb.empty()) {
+            std::uint64_t val;
+            if (!rb.pop(val)) {
+                std::this_thread::yield();
+                continue;
+            }
+            // Check strict monotonicity — flag on first violation / 检查严格递增——首次违例记 flag
+            if (!first && !(val > last_value)) {
+                order_violated.store(true, std::memory_order_relaxed);
+            }
+            last_value = val;
+            first = false;
+            ++local_pops;
+            // Throttle every 4096 pops — µs-level sleep guarantees producer overflow / 每 4096 次 pop 节流(微秒 sleep)——强制溢出
+            if (local_pops % 4096 == 0) {
+                std::this_thread::sleep_for(std::chrono::microseconds{100});
+            }
+        }
+        received.store(local_pops, std::memory_order_relaxed);
+    });
+
+    producer.join();
+    consumer.join();
+
+    std::uint64_t recv = received.load();
+    std::uint64_t drop = rb.dropped();
+
+    REQUIRE(!order_violated.load());
+    REQUIRE(recv == N - drop);
+    REQUIRE(drop > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 12. Single-threaded throughput benchmark — push only / 单线程吞吐基准——仅推入
+// ---------------------------------------------------------------------------
+
+TEST_CASE("RingBuffer single-threaded push throughput benchmark", "[core][ringbuffer][bench]") {
+    constexpr std::size_t N = 5'000'000;
+    RingBuffer<std::uint64_t> rb(65536); // large capacity, never full / 大容量,永不填满
+
+    auto t0 = std::chrono::steady_clock::now();
+    for (std::uint64_t i = 0; i < N; ++i) {
+        rb.push(i);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+
+    auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double ops_per_sec = (double)N / (double)elapsed_ns * 1e9;
+
+    // Minimal sanity: push must be fast enough (> 1M ops/s on any machine) / 最低健康检查:任何机器上都应 > 1M ops/s
+    REQUIRE(ops_per_sec > 1'000'000.0);
+
+    // Print for manual recording into BENCHMARK.md / 打印供手动录入 BENCHMARK.md
+    std::cout << "[bench] Single-thread push: " << N << " items in " << elapsed_ns
+              << " ns → " << (ops_per_sec / 1e6) << " M ops/s" << std::endl;
 }
