@@ -5,6 +5,9 @@ add_executable(IndusScope
 target_link_libraries(IndusScope
     PRIVATE
         IndusScope::ui
+        indusscope_uiplugin
         IndusScope::core
         IndusScope::protocol
+        Qt6::Quick
+        Qt6::Qml
 )

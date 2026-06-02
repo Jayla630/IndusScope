@@ -16,6 +16,12 @@ include(CTest)
 # --- Dependencies ---
 # Qt6: resolved at top level so all subdirectories see the targets
 find_package(Qt6 REQUIRED COMPONENTS Core Quick)
+# Enable AUTOMOC — required by qt_add_qml_module for generated plugin stubs.
+# 启用 AUTOMOC — qt_add_qml_module 生成的插件桩需要 MOC 处理。
+qt_standard_project_setup()
+# QTP0001 NEW: place QML modules at :/qt/qml/ so loadFromModule can discover them.
+# QTP0001 NEW: 将 QML 模块放在 :/qt/qml/,使 loadFromModule 可自动发现模块。
+qt_policy(SET QTP0001 NEW)
 
 # Catch2: fetched only when testing is enabled
 if(BUILD_TESTING)

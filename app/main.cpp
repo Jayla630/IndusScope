@@ -1,42 +1,36 @@
-#include <iostream>
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QtQml/QQmlExtensionPlugin>
 
-#include "indusscope/protocol/version.h"
-#include "indusscope/core/version.h"
-#include "indusscope/ui/version.h"
-#include "indusscope/core/MockSource.h"
+// Static QML plugin import — required when indusscope_ui is linked statically.
+// The plugin class name is URI "IndusScope.Ui" with dots → underscores + "Plugin".
+// 静态 QML 插件导入 — indusscope_ui 以静态库链接时必须显式导入。
+// 插件类名由 URI "IndusScope.Ui" 将点号替换为下划线并追加 "Plugin" 生成。
+Q_IMPORT_QML_PLUGIN(IndusScope_UiPlugin)
 
-int main() {
-    // --- Layer versions / 三层版本 ---
-    std::cout << indusscope::protocol::version() << std::endl;
-    std::cout << indusscope::core::version() << std::endl;
-    std::cout << indusscope::ui::version() << std::endl;
+/// Minimal Qt Quick entry point for S1.4a — bootstraps an empty window.
+/// S1.4a 最小 Qt Quick 入口 — 引导空窗口骨架。
+int main(int argc, char *argv[])
+{
+    // QGuiApplication is sufficient for Qt Quick scene-graph rendering;
+    // QApplication (QtWidgets) is not needed and not linked.
+    // QGuiApplication 足够 Qt Quick 场景图渲染;无需 QApplication (QtWidgets),未链接。
+    QGuiApplication app(argc, argv);
 
-    // --- MockSource headless demo / 模拟源无头演示 ---
-    std::cout << "\n[MockSource demo] sample_rate=1000Hz, signal=10Hz sine, duration=1s"
-              << std::endl;
-    std::cout << "[MockSource 演示] 采样率=1000Hz,信号=10Hz 正弦,时长=1s"
-              << std::endl;
+    QQmlApplicationEngine engine;
 
-    using indusscope::core::MockSource;
-    using indusscope::core::MockSourceConfig;
-    using indusscope::core::RingBuffer;
-    using indusscope::core::SamplePoint;
+    // Graceful exit if QML module fails to load (e.g. missing plugin).
+    // QML 模块加载失败时优雅退出 (如插件缺失)。
+    QObject::connect(
+        &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
+        []() { QCoreApplication::exit(EXIT_FAILURE); },
+        Qt::QueuedConnection);
 
-    MockSourceConfig cfg;
-    cfg.sample_rate_hz = 1000.0;
-    cfg.signal_config.amplitude = 1.0;
-    cfg.signal_config.frequency_hz = 10.0; // signal freq ≠ sample rate / 信号频率 ≠ 采样率
-    cfg.signal_config.noise_stddev = 0.1;
+    // Module URI: "IndusScope.Ui" matches qt_add_qml_module URI in ui/CMakeLists.txt.
+    // Requires QTP0001 NEW so the module is at :/qt/qml/ (default QML import path).
+    // 模块 URI: "IndusScope.Ui" 对齐 ui/CMakeLists.txt 中 qt_add_qml_module 的 URI。
+    // 需要 QTP0001 NEW,将模块放在 :/qt/qml/ (默认 QML 导入路径)。
+    engine.loadFromModule("IndusScope.Ui", "Main");
 
-    RingBuffer<SamplePoint> sink(2048); // large enough to avoid drops / 足够大,不丢点
-    MockSource src(cfg, sink);
-
-    auto stats = src.run_for(std::chrono::seconds(1));
-
-    std::cout << "produced:       " << stats.produced << std::endl;
-    std::cout << "dropped:        " << stats.dropped << std::endl;
-    std::cout << "elapsed_ms:     " << (stats.elapsed_ns / 1'000'000) << std::endl;
-    std::cout << "achieved_rate:  " << stats.achieved_rate_hz << " Hz" << std::endl;
-
-    return 0;
+    return app.exec();
 }
