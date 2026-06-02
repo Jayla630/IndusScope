@@ -14,3 +14,14 @@ target_link_libraries(indusscope_ui
         Qt6::Core
         Qt6::Quick
 )
+
+# --- QML module / QML 模块 ---
+# Attach a QML module to the static ui library so Main.qml is bundled
+# as a compiled-in resource and loadable via engine.loadFromModule().
+# 将 QML 模块挂到静态 ui 库,使 Main.qml 作为编译期资源打包,
+# 并通过 engine.loadFromModule() 加载。
+qt_add_qml_module(indusscope_ui
+    URI "IndusScope.Ui"
+    VERSION 1.0
+    QML_FILES qml/Main.qml
+)
