@@ -1,6 +1,7 @@
 add_library(indusscope_core STATIC
     src/version.cpp
     src/SignalGenerator.cpp
+    src/MockSource.cpp
 )
 add_library(IndusScope::core ALIAS indusscope_core)
 
