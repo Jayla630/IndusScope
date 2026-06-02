@@ -10,4 +10,5 @@ target_link_libraries(IndusScope
         IndusScope::protocol
         Qt6::Quick
         Qt6::Qml
+        Qt6::Graphs
 )

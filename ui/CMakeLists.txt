@@ -6,6 +6,8 @@ add_library(IndusScope::ui ALIAS indusscope_ui)
 target_include_directories(indusscope_ui
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/indusscope/ui
 )
 
 target_link_libraries(indusscope_ui
@@ -24,4 +26,11 @@ qt_add_qml_module(indusscope_ui
     URI "IndusScope.Ui"
     VERSION 1.0
     QML_FILES qml/Main.qml
+    SOURCES
+        include/indusscope/ui/CurveController.h
+        src/CurveController.cpp
+    DEPENDENCIES
+        QtQuick
+        QtGraphs
+    NO_PLUGIN_OPTIONAL
 )
