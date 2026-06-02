@@ -34,3 +34,15 @@ target_link_libraries(test_core_signal_generator
 )
 
 catch_discover_tests(test_core_signal_generator)
+
+add_executable(test_core_mock_source
+    test_mock_source.cpp
+)
+
+target_link_libraries(test_core_mock_source
+    PRIVATE
+        IndusScope::core
+        Catch2::Catch2WithMain
+)
+
+catch_discover_tests(test_core_mock_source)
