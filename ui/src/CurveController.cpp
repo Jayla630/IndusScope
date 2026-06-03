@@ -7,6 +7,8 @@
 #include "indusscope/core/SignalGenerator.h"
 
 #include <QTimer>
+#include <QThread>
+#include <QDebug>
 
 namespace indusscope::ui {
 
@@ -20,6 +22,8 @@ CurveController::CurveController(QObject* parent)
     using indusscope::core::MockSourceConfig;
     using indusscope::core::SignalConfig;
 
+    qDebug() << "[UI] CurveController ctor on thread" << QThread::currentThreadId();
+
     // --- Assemble AcquisitionWorker (producer half) 装配 AcquisitionWorker (生产者半场) ---
 
     MockSourceConfig cfg;
@@ -31,18 +35,58 @@ CurveController::CurveController(QObject* parent)
     cfg.signal_config.noise_stddev = 0.0;            // pure sine for visual verification
                                                       // 纯正弦便于目视验证
 
-    m_worker = new AcquisitionWorker(*m_ringBuf, cfg, this);  // parent=this → Qt parent-child RAII
-                                                               // parent=this → Qt 父子 RAII
+    // No parent — moveToThread forbids parent QObject; lifecycle via deleteLater below.
+    // 无 parent——moveToThread 禁止父 QObject;生命周期由下方的 deleteLater 管理。
+    m_worker = new AcquisitionWorker(*m_ringBuf, cfg);
 
-    // --- Configure timer (not started — QML calls start()) 配置定时器 (不启动——QML 调用 start()) ---
+    // Move worker (and its child QTimer) to dedicated thread.
+    // 将 worker (及其子 QTimer) 移到专用线程。
+    m_worker->moveToThread(&m_thread);
+
+    // Lifecycle: delete worker when thread event loop ends.
+    // 生命周期: 线程事件循环结束时删除 worker。
+    // This is the canonical moveToThread ownership pattern — not a bare-new leak.
+    // 这是 moveToThread 公认的所有权模式——非裸 new 泄漏。
+    connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
+
+    // --- Control plane: queued signals from UI thread → worker thread 控制面: UI 线程 → worker 线程的排队信号 ---
+
+    // Explicit Qt::QueuedConnection so reviewers can verify at a glance.
+    // 显式 Qt::QueuedConnection, review 时一眼可验。
+    connect(this, &CurveController::startRequested,
+            m_worker, &AcquisitionWorker::start,
+            Qt::QueuedConnection);
+    connect(this, &CurveController::stopRequested,
+            m_worker, &AcquisitionWorker::stop,
+            Qt::QueuedConnection);
+
+    // --- Configure render timer (not started — QML calls start()) 配置渲染定时器 (不启动——QML 调用 start()) ---
 
     m_timer->setInterval(kTimerIntervalMs);
     connect(m_timer, &QTimer::timeout, this, &CurveController::onTick);
+
+    // Start worker thread — event loop idles until startRequested() is emitted.
+    // 启动 worker 线程——事件循环空转直到发射 startRequested()。
+    m_thread.start();
 }
 
-CurveController::~CurveController() = default;
-// Defined here where RingBuffer<SamplePoint> is a complete type.
-// 在此定义,此时 RingBuffer<SamplePoint> 为完整类型。
+CurveController::~CurveController()
+{
+    // Shutdown dance — prevent UAF on worker / ring:
+    // 关机舞步——防止 worker / ring 的 use-after-free:
+    // 1. Stop consumer timer so no more pop_batch() from UI thread.
+    //    停止消费定时器,UI 线程不再 pop_batch()。
+    // 2. Quit worker event loop → deleteLater fires → worker destroyed on worker thread.
+    //    退出 worker 事件循环 → deleteLater 触发 → worker 在 worker 线程析构。
+    // 3. Wait for worker thread to fully finish before ~QThread runs.
+    //    等待 worker 线程完全结束,再让 ~QThread 执行。
+    // After this body, members destruct in reverse decl order:
+    // m_thread (destroyed first, but already idle) → ... → m_ringBuf (destroyed last).
+    // 本函数体返回后,成员按声明逆序析构: m_thread (最先析构,但已空闲) → ... → m_ringBuf (最后析构)。
+    m_timer->stop();
+    m_thread.quit();
+    m_thread.wait();
+}
 
 // --- Property accessors 属性访问器 ---
 
@@ -58,7 +102,9 @@ void CurveController::start()
     if (m_running)
         return;
     m_running = true;
-    m_worker->start();
+    qDebug() << "[UI] start() on thread" << QThread::currentThreadId();
+    emit startRequested();   // queued to worker thread — production begins asynchronously
+                             // 排队到 worker 线程——异步开始生产
     m_timer->start();
     emit runningChanged();
 }
@@ -67,7 +113,8 @@ void CurveController::stop()
 {
     if (!m_running)
         return;
-    m_worker->stop();
+    emit stopRequested();    // queued to worker thread — production stops asynchronously
+                             // 排队到 worker 线程——异步停止生产
     m_timer->stop();
     m_running = false;
     emit runningChanged();
