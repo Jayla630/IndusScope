@@ -46,3 +46,15 @@ target_link_libraries(test_core_mock_source
 )
 
 catch_discover_tests(test_core_mock_source)
+
+add_executable(test_core_minmax_downsampler
+    test_minmax_downsampler.cpp
+)
+
+target_link_libraries(test_core_minmax_downsampler
+    PRIVATE
+        IndusScope::core
+        Catch2::Catch2WithMain
+)
+
+catch_discover_tests(test_core_minmax_downsampler)
