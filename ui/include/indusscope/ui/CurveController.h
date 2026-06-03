@@ -6,8 +6,8 @@
 #include <QThread>
 #include <QtQml/qqmlregistration.h>
 
-#include <deque>
 #include <memory>
+#include <vector>
 #include <cstdint>
 
 // Forward-declare core types to keep header free of core implementation details.
@@ -29,14 +29,20 @@ class AcquisitionWorker;  // forward decl / 前置声明
 /// Production is delegated to AcquisitionWorker (owns MockSource + its own QTimer).
 /// 生产委托给 AcquisitionWorker (持有 MockSource + 自己的 QTimer)。
 ///
-/// Each timer tick:
-///   1. RingBuffer.pop_batch() → fixed-capacity deque window
-///   2. Trim window to kWindowSize (oldest points evicted)
-///   3. Snapshot to QList<QPointF>, update xMin/xMax, emit signals
-/// 每次 timer 滴答:
-///   1. RingBuffer.pop_batch() → 固定容量 deque 窗口
-///   2. 裁剪窗口至 kWindowSize (老点被挤出)
-///   3. 快照到 QList<QPointF>,更新 xMin/xMax,发射信号
+/// Each timer tick (S2.3b — Min/Max downsampling pipeline):
+/// 每次 timer 滴答 (S2.3b — Min/Max 降采样管线):
+///   1. RingBuffer.pop_batch() → raw samples from worker thread
+///   2. Write each sample into fixed-capacity circular history (overwrite oldest)
+///   3. Copy valid history window to contiguous scratch buffer (handling wrap)
+///   4. minmax_downsample(scratch, historyCount, kBucketCount, m_dsOut)
+///   5. Map m_dsOut → QList<QPointF> m_points (timestamp_ns×1e-9 = x, value = y)
+///   6. Update xMin/xMax from history edges, emit signals
+///   1. RingBuffer.pop_batch() → 从 worker 线程拉取原始样本
+///   2. 逐个写入固定容量环形历史 (覆盖最旧)
+///   3. 将有效历史区间拷入连续 scratch 缓冲 (处理 wrap)
+///   4. minmax_downsample(scratch, historyCount, kBucketCount, m_dsOut)
+///   5. m_dsOut 映射为 QList<QPointF> m_points (timestamp_ns×1e-9 = x, value = y)
+///   6. 从历史首尾更新 xMin/xMax,发射信号
 ///
 /// Does NOT #include or link any chart library — the only dependencies are
 /// Qt6::Core (QObject/QTimer/signals) + Qt6::Qml (QML_ELEMENT) + Qt::Gui (QPointF)
@@ -122,9 +128,13 @@ private slots:
 
 private:
     // --- Constants 常量 ---
-    // Window: 1000 points at 5000 Hz = 0.2 s visible (2 full 10 Hz periods).
-    // 窗口: 5000 Hz 下 1000 点 = 0.2 秒可见范围 (10 Hz 的 2 个完整周期)。
-    static constexpr int    kWindowSize       = 1000;
+    // kHistoryCapacity: 2^17 = 131072, >= 100k with ~30% headroom.
+    // kHistoryCapacity: 2^17 = 131072, ≥100k 留约 30% 头寸。
+    static constexpr int    kHistoryCapacity  = 131072; // 2^17, power of 2 for & mask / 2 的幂,用于 & 掩码
+    static constexpr int    kHistoryMask      = kHistoryCapacity - 1;
+    // kBucketCount: ~screen width in pixels; produces ≤2×bucket_count render points.
+    // kBucketCount: 屏宽量级像素数;产生 ≤2×桶数个渲染点。
+    static constexpr int    kBucketCount      = 1000;
     static constexpr int    kProducePerTick   = 80;    // 5000 Hz × 16 ms
     static constexpr int    kRingBufCapacity  = 4096;  // 2^12, generous headroom
     static constexpr int    kTimerIntervalMs  = 16;    // ~60 fps
@@ -149,20 +159,44 @@ private:
     /// 声明在 m_ringBuf 之后 → 先于 m_ringBuf 析构 (逆序)。
     QThread m_thread;
 
-    // --- Scrolling window 滚动窗口 ---
+    // --- History ring — S2.3b fixed-capacity circular buffer / 历史环——S2.3b 固定容量环形缓冲 ---
 
-    /// Fixed-capacity deque window; oldest points evicted from front.
-    /// 固定容量双端队列窗口;老点从前端挤出。
-    std::deque<QPointF> m_window;
+    /// Fixed-capacity circular history, stores raw SamplePoint (not QPointF).
+    /// 固定容量环形历史,存储原始 SamplePoint (非 QPointF)。
+    /// Pre-allocated once at construction; overwrites oldest on wrap.
+    /// 构造时一次预分配;回绕时覆盖最旧。
+    std::vector<indusscope::core::SamplePoint> m_history;
 
-    /// QML-visible snapshot, refreshed each tick.
-    /// QML 可见快照,每次 tick 刷新。
+    /// Next write position in m_history (0 .. kHistoryCapacity-1).
+    /// m_history 中下一写入位置 (0 .. kHistoryCapacity-1)。
+    std::size_t m_historyWriteIdx = 0;
+
+    /// Number of valid points currently in history (0 .. kHistoryCapacity).
+    /// 当前历史中有效点数 (0 .. kHistoryCapacity)。
+    std::size_t m_historyCount = 0;
+
+    /// Contiguous scratch buffer for feeding minmax_downsample (pre-allocated).
+    /// 连续 scratch 缓冲,供 minmax_downsample 喂入 (预分配)。
+    std::vector<indusscope::core::SamplePoint> m_scratch;
+
+    /// Downsample output vector — reused across ticks, resize by minmax_downsample.
+    /// 降采样输出 vector——跨 tick 复用,由 minmax_downsample resize。
+    std::vector<indusscope::core::SamplePoint> m_dsOut;
+
+    /// QML-visible snapshot, refreshed each tick from downsample output.
+    /// QML 可见快照,每次 tick 从降采样输出刷新。
     QList<QPointF> m_points;
 
-    /// X-axis range, updated each tick from window edges.
-    /// X 轴范围,每次 tick 从窗口边界更新。
+    /// X-axis range, updated each tick from history timestamp edges.
+    /// X 轴范围,每次 tick 从历史时间戳边界更新。
     qreal m_xMin = 0.0;
     qreal m_xMax = 0.2;  // expected full-window width at 5000 Hz / 5000 Hz 下预期的全窗口宽度
+
+    // --- FPS counter 帧率计数 ---
+
+    /// Incremented by frameSwapped signal on GUI thread (queued connection).
+    /// 由 GUI 线程上的 frameSwapped 信号递增 (排队连接)。
+    int m_frameCount = 0;
 
     // --- Timer 定时器 ---
 
