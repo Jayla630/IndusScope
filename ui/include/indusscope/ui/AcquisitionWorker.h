@@ -82,6 +82,10 @@ private:
     QTimer* m_produceTimer = nullptr;
 
     bool m_running = false;
+
+    /// One-shot guard for first-tick thread-id log — avoids log spam.
+    /// 首 tick 线程 id 日志的一次性守卫——避免刷屏。
+    bool m_loggedThread = false;
 };
 
 } // namespace indusscope::ui

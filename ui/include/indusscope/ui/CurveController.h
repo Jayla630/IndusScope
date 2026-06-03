@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QList>
 #include <QPointF>
+#include <QThread>
 #include <QtQml/qqmlregistration.h>
 
 #include <deque>
@@ -106,6 +107,14 @@ signals:
     /// 运行状态切换时发射。
     void runningChanged();
 
+    /// Control-plane signal — queued to worker thread to start production.
+    /// 控制面信号——排队到 worker 线程启动生产。
+    void startRequested();
+
+    /// Control-plane signal — queued to worker thread to stop production.
+    /// 控制面信号——排队到 worker 线程停止生产。
+    void stopRequested();
+
 private slots:
     /// Timer callback — executes the 7-step data flow.
     /// 定时器回调——执行七步数据流。
@@ -126,7 +135,19 @@ private:
 
     /// Ring buffer: sink for MockSource, source for window pop.
     /// 环形缓冲: MockSource 的下沉,滚动窗口的拉取源。
+    /// Declared before m_thread so it is destroyed last (reverse decl order);
+    /// combined with ~CurveController() quit→wait this is defense-in-depth against UAF.
+    /// 声明在 m_thread 之前,因此最后析构 (逆序析构);配合析构函数 quit→wait 纵深防御 UAF。
     std::unique_ptr<indusscope::core::RingBuffer<indusscope::core::SamplePoint>> m_ringBuf;
+
+    /// Worker thread — started once at construction, quit only in destructor.
+    /// 工作线程——构造时启动一次,仅在析构中 quit。
+    /// Event loop idles until startRequested() is emitted; reusable across
+    /// start/stop cycles without thread churn.
+    /// 事件循环空转直到发射 startRequested();可在 start/stop 周期重复使用,不反复创建线程。
+    /// Declared after m_ringBuf → destroyed before it (reverse decl order).
+    /// 声明在 m_ringBuf 之后 → 先于 m_ringBuf 析构 (逆序)。
+    QThread m_thread;
 
     // --- Scrolling window 滚动窗口 ---
 
@@ -149,10 +170,10 @@ private:
     /// 由 Qt 父子关系持有 (this),无需手动 delete。
     QTimer* m_timer = nullptr;
 
-    /// Producer worker — owns MockSource + its own QTimer; runs on UI thread in this slice.
-    /// 生产者 worker——持有 MockSource + 自己的 QTimer;本 slice 跑在 UI 线程。
-    /// Owned by Qt parent-child (this).  S2.1b will move to a dedicated thread.
-    /// 由 Qt 父子关系持有 (this)。S2.1b 将移到专用线程。
+    /// Producer worker — owns MockSource + its own QTimer; moved to m_thread via moveToThread.
+    /// 生产者 worker——持有 MockSource + 自己的 QTimer;通过 moveToThread 移到 m_thread。
+    /// Lifetime managed by connect(&m_thread, finished, m_worker, deleteLater) — no parent.
+    /// 生命周期由 connect(&m_thread, finished, m_worker, deleteLater) 管理——无 parent。
     AcquisitionWorker* m_worker = nullptr;
 
     bool m_running = false;
