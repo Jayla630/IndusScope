@@ -1,4 +1,5 @@
 #include "indusscope/ui/CurveController.h"
+#include "indusscope/ui/AcquisitionWorker.h"
 
 #include "indusscope/core/MockSource.h"
 #include "indusscope/core/RingBuffer.h"
@@ -19,7 +20,7 @@ CurveController::CurveController(QObject* parent)
     using indusscope::core::MockSourceConfig;
     using indusscope::core::SignalConfig;
 
-    // --- Assemble MockSource 装配 MockSource ---
+    // --- Assemble AcquisitionWorker (producer half) 装配 AcquisitionWorker (生产者半场) ---
 
     MockSourceConfig cfg;
     cfg.sample_rate_hz      = kSampleRateHz;    // 5000 Hz
@@ -30,7 +31,8 @@ CurveController::CurveController(QObject* parent)
     cfg.signal_config.noise_stddev = 0.0;            // pure sine for visual verification
                                                       // 纯正弦便于目视验证
 
-    m_source = std::make_unique<indusscope::core::MockSource>(cfg, *m_ringBuf);
+    m_worker = new AcquisitionWorker(*m_ringBuf, cfg, this);  // parent=this → Qt parent-child RAII
+                                                               // parent=this → Qt 父子 RAII
 
     // --- Configure timer (not started — QML calls start()) 配置定时器 (不启动——QML 调用 start()) ---
 
@@ -39,8 +41,8 @@ CurveController::CurveController(QObject* parent)
 }
 
 CurveController::~CurveController() = default;
-// Defined here where RingBuffer<SamplePoint> and MockSource are complete types.
-// 在此定义,此时 RingBuffer<SamplePoint> 与 MockSource 为完整类型。
+// Defined here where RingBuffer<SamplePoint> is a complete type.
+// 在此定义,此时 RingBuffer<SamplePoint> 为完整类型。
 
 // --- Property accessors 属性访问器 ---
 
@@ -56,6 +58,7 @@ void CurveController::start()
     if (m_running)
         return;
     m_running = true;
+    m_worker->start();
     m_timer->start();
     emit runningChanged();
 }
@@ -64,6 +67,7 @@ void CurveController::stop()
 {
     if (!m_running)
         return;
+    m_worker->stop();
     m_timer->stop();
     m_running = false;
     emit runningChanged();
@@ -73,12 +77,8 @@ void CurveController::stop()
 
 void CurveController::onTick()
 {
-    // Step 1: Produce k samples into RingBuffer.
-    // 步骤 1: 产出 k 个样本到环形缓冲。
-    m_source->produce(kProducePerTick);
-
-    // Step 2: Pop all available samples from RingBuffer.
-    // 步骤 2: 从环形缓冲捞出所有可用样本。
+    // Step 1: Pop all available samples from RingBuffer (producer is now AcquisitionWorker).
+    // 步骤 1: 从环形缓冲捞出所有可用样本 (生产者现在是 AcquisitionWorker)。
     indusscope::core::SamplePoint buf[kProducePerTick];  // stack buffer, max expected per tick
                                                          // 栈缓冲,每次 tick 最大预期量
     const std::size_t n = m_ringBuf->pop_batch(buf, kProducePerTick);

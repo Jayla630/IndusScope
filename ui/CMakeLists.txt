@@ -27,6 +27,8 @@ qt_add_qml_module(indusscope_ui
     VERSION 1.0
     QML_FILES qml/Main.qml
     SOURCES
+        include/indusscope/ui/AcquisitionWorker.h
+        src/AcquisitionWorker.cpp
         include/indusscope/ui/CurveController.h
         src/CurveController.cpp
     DEPENDENCIES
