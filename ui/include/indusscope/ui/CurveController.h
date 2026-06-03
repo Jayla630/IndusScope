@@ -15,31 +15,31 @@
 namespace indusscope::core {
 struct SamplePoint;
 template <typename T> class RingBuffer;
-class MockSource;
-struct MockSourceConfig;
 } // namespace indusscope::core
 
 class QTimer;
 
 namespace indusscope::ui {
 
-/// Renderer-agnostic scrolling curve adapter — driven by QTimer + MockSource.
-/// 渲染器无关的滚动曲线适配器——由 QTimer + MockSource 驱动。
+class AcquisitionWorker;  // forward decl / 前置声明
+
+/// Renderer-agnostic scrolling curve adapter — pure consumer, driven by QTimer.
+/// 渲染器无关的滚动曲线适配器——纯消费者,由 QTimer 驱动。
+/// Production is delegated to AcquisitionWorker (owns MockSource + its own QTimer).
+/// 生产委托给 AcquisitionWorker (持有 MockSource + 自己的 QTimer)。
 ///
 /// Each timer tick:
-///   1. MockSource.produce(k) → RingBuffer
-///   2. RingBuffer.pop_batch() → fixed-capacity deque window
-///   3. Trim window to kWindowSize (oldest points evicted)
-///   4. Snapshot to QList<QPointF>, update xMin/xMax, emit signals
+///   1. RingBuffer.pop_batch() → fixed-capacity deque window
+///   2. Trim window to kWindowSize (oldest points evicted)
+///   3. Snapshot to QList<QPointF>, update xMin/xMax, emit signals
 /// 每次 timer 滴答:
-///   1. MockSource.produce(k) → 环形缓冲
-///   2. RingBuffer.pop_batch() → 固定容量 deque 窗口
-///   3. 裁剪窗口至 kWindowSize (老点被挤出)
-///   4. 快照到 QList<QPointF>,更新 xMin/xMax,发射信号
+///   1. RingBuffer.pop_batch() → 固定容量 deque 窗口
+///   2. 裁剪窗口至 kWindowSize (老点被挤出)
+///   3. 快照到 QList<QPointF>,更新 xMin/xMax,发射信号
 ///
 /// Does NOT #include or link any chart library — the only dependencies are
 /// Qt6::Core (QObject/QTimer/signals) + Qt6::Qml (QML_ELEMENT) + Qt::Gui (QPointF)
-/// + indusscope::core (RingBuffer/MockSource/SamplePoint/SignalGenerator).
+/// + indusscope::core (RingBuffer/SamplePoint).
 /// 不 #include 或链接任何图表库——仅依赖 Qt6::Core + Qt6::Qml + Qt::Gui + core。
 ///
 /// Construction only assembles members; QML must call start() explicitly
@@ -67,8 +67,8 @@ class CurveController : public QObject {
     Q_PROPERTY(bool running READ isRunning NOTIFY runningChanged FINAL)
 
 public:
-    /// Construct and assemble RingBuffer, MockSource, and QTimer.
-    /// 构造并装配 RingBuffer、MockSource 与 QTimer。
+    /// Construct and assemble RingBuffer, AcquisitionWorker, and QTimer.
+    /// 构造并装配 RingBuffer、AcquisitionWorker 与 QTimer。
     /// The timer is NOT started — QML must call start() explicitly.
     /// timer 不会启动——QML 必须显式调用 start()。
     explicit CurveController(QObject* parent = nullptr);
@@ -128,10 +128,6 @@ private:
     /// 环形缓冲: MockSource 的下沉,滚动窗口的拉取源。
     std::unique_ptr<indusscope::core::RingBuffer<indusscope::core::SamplePoint>> m_ringBuf;
 
-    /// Mock signal source — deterministic, no sleep (produce() only).
-    /// 模拟信号源——确定性,不睡觉 (仅用 produce())。
-    std::unique_ptr<indusscope::core::MockSource> m_source;
-
     // --- Scrolling window 滚动窗口 ---
 
     /// Fixed-capacity deque window; oldest points evicted from front.
@@ -152,6 +148,12 @@ private:
     /// Owned by Qt parent-child (this), no manual delete needed.
     /// 由 Qt 父子关系持有 (this),无需手动 delete。
     QTimer* m_timer = nullptr;
+
+    /// Producer worker — owns MockSource + its own QTimer; runs on UI thread in this slice.
+    /// 生产者 worker——持有 MockSource + 自己的 QTimer;本 slice 跑在 UI 线程。
+    /// Owned by Qt parent-child (this).  S2.1b will move to a dedicated thread.
+    /// 由 Qt 父子关系持有 (this)。S2.1b 将移到专用线程。
+    AcquisitionWorker* m_worker = nullptr;
 
     bool m_running = false;
 };
