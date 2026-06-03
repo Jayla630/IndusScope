@@ -1,11 +1,14 @@
 #include "indusscope/ui/CurveController.h"
 #include "indusscope/ui/AcquisitionWorker.h"
 
+#include "indusscope/core/MinMaxDownsampler.h"
 #include "indusscope/core/MockSource.h"
 #include "indusscope/core/RingBuffer.h"
 #include "indusscope/core/SamplePoint.h"
 #include "indusscope/core/SignalGenerator.h"
 
+#include <QGuiApplication>
+#include <QQuickWindow>
 #include <QTimer>
 #include <QThread>
 #include <QDebug>
@@ -16,8 +19,10 @@ CurveController::CurveController(QObject* parent)
     : QObject(parent)
     , m_ringBuf(std::make_unique<indusscope::core::RingBuffer<indusscope::core::SamplePoint>>(
           kRingBufCapacity))
-    , m_timer(new QTimer(this))  // parent=this → Qt parent-child ownership, RAII
-                                 // parent=this → Qt 父子所有权,RAII
+    , m_history(kHistoryCapacity)      // pre-allocate; filled by index, no push_back / 预分配;按索引填入,无 push_back
+    , m_scratch(kHistoryCapacity)      // pre-allocate; worst-case full history copy / 预分配;最坏情况全量历史拷贝
+    , m_timer(new QTimer(this))        // parent=this → Qt parent-child ownership, RAII
+                                       // parent=this → Qt 父子所有权,RAII
 {
     using indusscope::core::MockSourceConfig;
     using indusscope::core::SignalConfig;
@@ -65,9 +70,55 @@ CurveController::CurveController(QObject* parent)
     m_timer->setInterval(kTimerIntervalMs);
     connect(m_timer, &QTimer::timeout, this, &CurveController::onTick);
 
-    // Start worker thread — event loop idles until startRequested() is emitted.
-    // 启动 worker 线程——事件循环空转直到发射 startRequested()。
+    // --- Start worker thread 启动 worker 线程 ---
+    // Event loop idles until startRequested() is emitted.
+    // 事件循环空转直到发射 startRequested()。
     m_thread.start();
+
+    // --- FPS counter: wire QQuickWindow::frameSwapped via queued connection 帧率计数:通过排队连接接入 QQuickWindow::frameSwapped ---
+    // Delay to event loop so the QQuickWindow is known to exist by then.
+    // 延迟到事件循环,此时 QQuickWindow 已知存在。
+    // AutoConnection demotes to QueuedConnection because receiver (this) is on GUI thread
+    // while frameSwapped fires from the render thread — no race on m_frameCount.
+    // AutoConnection 因 receiver (this) 在 GUI 线程、frameSwapped 从渲染线程发射,
+    // 自动降为 QueuedConnection——m_frameCount 无竞争。
+    QMetaObject::invokeMethod(this, [this] {
+        const auto wins = QGuiApplication::topLevelWindows();
+        for (QWindow* w : wins) {
+            auto* qw = qobject_cast<QQuickWindow*>(w);
+            if (qw) {
+                connect(qw, &QQuickWindow::frameSwapped, this,
+                        [this] { if (m_running) ++m_frameCount; });
+                qDebug() << "[UI] FPS counter hooked to QQuickWindow";
+                return;
+            }
+        }
+        qWarning() << "[UI] FPS counter: no QQuickWindow found — frameSwapped not connected";
+    }, Qt::QueuedConnection);
+
+    // --- 1-second FPS reporter 每秒 FPS 报告 ---
+    QTimer* fpsTimer = new QTimer(this);
+    fpsTimer->setInterval(1000);
+    connect(fpsTimer, &QTimer::timeout, this, [this] {
+        if (!m_running)
+            return;
+        const auto wins = QGuiApplication::topLevelWindows();
+        bool hasQQuick = false;
+        for (QWindow* w : wins) {
+            if (qobject_cast<QQuickWindow*>(w)) {
+                hasQQuick = true;
+                break;
+            }
+        }
+        if (!hasQQuick) {
+            qWarning() << "[UI] FPS counter: no QQuickWindow found — frameSwapped not connected";
+            return;
+        }
+        qInfo() << "[FPS]" << m_frameCount;
+        m_frameCount = 0;
+    });
+    fpsTimer->setTimerType(Qt::VeryCoarseTimer); // 1 s precision, low overhead / 1 秒精度,低开销
+    fpsTimer->start();
 }
 
 CurveController::~CurveController()
@@ -132,30 +183,67 @@ void CurveController::onTick()
     if (n == 0)
         return;
 
-    // Step 3: Push new samples into the scrolling window.
-    // 步骤 3: 新样本推入滚动窗口。
-    constexpr double kNanosPerSec = 1'000'000'000.0;
+    // Step 2: Write each new sample into the fixed-capacity circular history ring.
+    // 步骤 2: 将每个新样本写入固定容量环形历史。
+    // Overwrite oldest when full; m_historyWriteIdx wraps via & mask.
+    // 满时覆盖最旧; m_historyWriteIdx 通过 & mask 回绕。
     for (std::size_t i = 0; i < n; ++i) {
-        // X = timestamp in seconds (start_timestamp_ns=0, so direct conversion).
-        // X = 纳秒时间戳转秒 (start_timestamp_ns=0,直接换算)。
-        double t_sec = static_cast<double>(buf[i].timestamp_ns) / kNanosPerSec;
-        m_window.push_back(QPointF(t_sec, buf[i].value));
+        m_history[m_historyWriteIdx] = buf[i];
+        m_historyWriteIdx = (m_historyWriteIdx + 1) & kHistoryMask;
+    }
+    // Update count — saturate at capacity (overwrites have already happened above).
+    // 更新计数——饱和在容量上限 (覆盖已在上方发生)。
+    m_historyCount = (m_historyCount + n > static_cast<std::size_t>(kHistoryCapacity))
+                         ? static_cast<std::size_t>(kHistoryCapacity)
+                         : m_historyCount + n;
+
+    // Step 3: Copy valid history window into contiguous scratch buffer (handling wrap).
+    // 步骤 3: 将有效历史区间拷入连续 scratch 缓冲 (处理 wrap)。
+    if (m_historyCount == 0)
+        return;
+
+    if (m_historyCount < static_cast<std::size_t>(kHistoryCapacity)) {
+        // Not yet wrapped — single segment [0, m_historyCount).
+        // 尚未回绕——单段 [0, m_historyCount)。
+        std::copy(m_history.begin(), m_history.begin() + static_cast<std::ptrdiff_t>(m_historyCount),
+                  m_scratch.begin());
+    } else {
+        // Wrapped — two segments: [writeIdx, cap) + [0, writeIdx).
+        // 已回绕——两段: [writeIdx, cap) + [0, writeIdx)。
+        const std::size_t seg1 = kHistoryCapacity - m_historyWriteIdx; // points from writeIdx to end
+                                                                        // 从 writeIdx 到尾部的点数
+        std::copy(m_history.begin() + static_cast<std::ptrdiff_t>(m_historyWriteIdx),
+                  m_history.end(),
+                  m_scratch.begin());
+        std::copy(m_history.begin(),
+                  m_history.begin() + static_cast<std::ptrdiff_t>(m_historyWriteIdx),
+                  m_scratch.begin() + static_cast<std::ptrdiff_t>(seg1));
     }
 
-    // Step 4: Trim to fixed capacity — oldest points evicted from front.
-    // 步骤 4: 裁剪至固定容量——老点从前端挤出。
-    while (m_window.size() > static_cast<std::size_t>(kWindowSize))
-        m_window.pop_front();
+    // Step 4: Min/Max downsampling on the FULL history (not just this tick's batch).
+    // 步骤 4: 对全历史做 Min/Max 降采样 (不是这一 tick 的批次)。
+    // This is the critical correctness point — downsampling only new points would
+    // discard the signal envelope that has accumulated across the entire window.
+    // 这是关键正确性点——仅降采样新点会丢弃整个窗口已累积的信号包络。
+    indusscope::core::minmax_downsample(m_scratch.data(), m_historyCount,
+                                        static_cast<std::size_t>(kBucketCount), m_dsOut);
 
-    // Step 5: Snapshot for QML property.
-    // 步骤 5: 生成 QML 属性快照。
-    m_points = QList<QPointF>(m_window.begin(), m_window.end());
+    // Step 5: Map downsample output → QList<QPointF> for QML binding.
+    // 步骤 5: 降采样输出映射为 QList<QPointF>,供 QML 绑定。
+    constexpr double kNanosPerSec = 1'000'000'000.0;
+    m_points.clear();
+    m_points.reserve(static_cast<int>(m_dsOut.size()));
+    for (const auto& sp : m_dsOut) {
+        m_points.append(QPointF(
+            static_cast<double>(sp.timestamp_ns) / kNanosPerSec,
+            sp.value));
+    }
 
-    // Step 6: Update X-axis range from window edges.
-    // 步骤 6: 从窗口边界更新 X 轴范围。
-    if (!m_window.empty()) {
-        m_xMin = m_window.front().x();
-        m_xMax = m_window.back().x();
+    // Step 6: Update X-axis range from history edges (scratch is in source order).
+    // 步骤 6: 从历史边界更新 X 轴范围 (scratch 按源序排列)。
+    if (m_historyCount > 0) {
+        m_xMin = static_cast<double>(m_scratch[0].timestamp_ns) / kNanosPerSec;
+        m_xMax = static_cast<double>(m_scratch[m_historyCount - 1].timestamp_ns) / kNanosPerSec;
     }
 
     // Step 7: Emit signals so QML rebinds.
