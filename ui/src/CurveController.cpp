@@ -13,6 +13,8 @@
 #include <QThread>
 #include <QDebug>
 
+#include <algorithm>   // std::sort
+
 namespace indusscope::ui {
 
 CurveController::CurveController(QObject* parent)
@@ -24,6 +26,8 @@ CurveController::CurveController(QObject* parent)
     , m_timer(new QTimer(this))        // parent=this → Qt parent-child ownership, RAII
                                        // parent=this → Qt 父子所有权,RAII
 {
+    m_latencies.reserve(kLatencySamples);
+
     using indusscope::core::MockSourceConfig;
     using indusscope::core::SignalConfig;
 
@@ -88,7 +92,31 @@ CurveController::CurveController(QObject* parent)
             auto* qw = qobject_cast<QQuickWindow*>(w);
             if (qw) {
                 connect(qw, &QQuickWindow::frameSwapped, this,
-                        [this] { if (m_running) ++m_frameCount; });
+                        [this] {
+                            if (!m_running) return;
+                            ++m_frameCount;
+                            if (m_pendingFrame && !m_latenciesCollected) {
+                                const auto now = std::chrono::steady_clock::now();
+                                if (now - m_startTimeNs > std::chrono::seconds(1)) {
+                                    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                        now - m_dataReadyNs).count();
+                                    m_latencies.push_back(ns);
+                                    if (m_latencies.size() >= static_cast<std::size_t>(kLatencySamples)) {
+                                        std::sort(m_latencies.begin(), m_latencies.end());
+                                        const std::size_t N = m_latencies.size();
+                                        const double p50 = static_cast<double>(m_latencies[N * 50 / 100]) / 1'000'000.0;
+                                        const double p99 = static_cast<double>(m_latencies[N * 99 / 100]) / 1'000'000.0;
+                                        const double max = static_cast<double>(m_latencies.back()) / 1'000'000.0;
+                                        qInfo() << "[Latency]" << "p50:" << p50 << "ms"
+                                                << "p99:" << p99 << "ms"
+                                                << "max:" << max << "ms"
+                                                << "(n=" << N << ")";
+                                        m_latenciesCollected = true;
+                                    }
+                                }
+                                m_pendingFrame = false;
+                            }
+                        });
                 qDebug() << "[UI] FPS counter hooked to QQuickWindow";
                 return;
             }
@@ -153,6 +181,7 @@ void CurveController::start()
     if (m_running)
         return;
     m_running = true;
+    m_startTimeNs = std::chrono::steady_clock::now();
     qDebug() << "[UI] start() on thread" << QThread::currentThreadId();
     emit startRequested();   // queued to worker thread — production begins asynchronously
                              // 排队到 worker 线程——异步开始生产
@@ -167,6 +196,7 @@ void CurveController::stop()
     emit stopRequested();    // queued to worker thread — production stops asynchronously
                              // 排队到 worker 线程——异步停止生产
     m_timer->stop();
+    m_pendingFrame = false;
     m_running = false;
     emit runningChanged();
 }
@@ -245,6 +275,11 @@ void CurveController::onTick()
         m_xMin = static_cast<double>(m_scratch[0].timestamp_ns) / kNanosPerSec;
         m_xMax = static_cast<double>(m_scratch[m_historyCount - 1].timestamp_ns) / kNanosPerSec;
     }
+
+    // Step 6.5: Stamp data-ready wall clock for render latency measurement.
+    // 步骤 6.5: 打数据就绪墙钟戳供渲染延迟测量。
+    m_dataReadyNs = std::chrono::steady_clock::now();
+    m_pendingFrame = true;
 
     // Step 7: Emit signals so QML rebinds.
     // 步骤 7: 发射信号使 QML 重新绑定。
