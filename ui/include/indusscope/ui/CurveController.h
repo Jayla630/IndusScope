@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <vector>
+#include <chrono>
 #include <cstdint>
 
 // Forward-declare core types to keep header free of core implementation details.
@@ -140,6 +141,7 @@ private:
     static constexpr int    kTimerIntervalMs  = 16;    // ~60 fps
     static constexpr double kSampleRateHz     = 5000.0;
     static constexpr double kSignalFreqHz     = 10.0;
+    static constexpr int    kLatencySamples   = 3000;  // ~50 s @ 60 fps; enough for stable p99 / ~50s@60fps,足够稳定 p99
 
     // --- Core data pipeline 数据管线 ---
 
@@ -197,6 +199,28 @@ private:
     /// Incremented by frameSwapped signal on GUI thread (queued connection).
     /// 由 GUI 线程上的 frameSwapped 信号递增 (排队连接)。
     int m_frameCount = 0;
+
+    // --- Latency measurement 延迟测量 ---
+
+    /// Wall-clock timestamp captured in onTick() after m_points is assembled, before emit.
+    /// onTick() 中 m_points 拼装完成后、emit 之前的墙钟时间戳。
+    std::chrono::steady_clock::time_point m_dataReadyNs{};
+
+    /// True when a new frame's data-ready timestamp is pending consumption by frameSwapped.
+    /// 新帧数据就绪时间戳等待 frameSwapped 消费时为真。
+    bool m_pendingFrame = false;
+
+    /// Ring buffer of per-frame render latencies in nanoseconds, pre-allocated.
+    /// 每帧渲染延迟纳秒值的环形收集缓冲,预分配。
+    std::vector<int64_t> m_latencies;
+
+    /// Set to true once kLatencySamples have been collected; stops further collection.
+    /// 收集满 kLatencySamples 后置真;停止继续收集。
+    bool m_latenciesCollected = false;
+
+    /// Timestamp captured in start() for warmup gating (skip first ~1 s of frames).
+    /// start() 中捕获的时间戳,用于预热门控 (跳过前约 1 秒帧)。
+    std::chrono::steady_clock::time_point m_startTimeNs{};
 
     // --- Timer 定时器 ---
 
