@@ -1,5 +1,6 @@
 add_library(indusscope_protocol STATIC
     src/version.cpp
+    src/MockProtocol.cpp
 )
 add_library(IndusScope::protocol ALIAS indusscope_protocol)
 
