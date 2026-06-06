@@ -98,7 +98,7 @@ TEST_CASE("SignalGenerator phase offset", "[core][signal_generator]") {
 //    A=0 (no sine), σ=0 (no noise), offset=5.0 → value() ≡ 5.0
 // ---------------------------------------------------------------------------
 
-TEST_CASE("SignalGenerator DC offset (A=0, σ=0)", "[core][signal_generator]") {
+TEST_CASE("SignalGenerator DC offset (A=0, sigma=0)", "[core][signal_generator]") {
     SignalConfig cfg;
     cfg.amplitude = 0.0;
     cfg.frequency_hz = 1.0;
@@ -304,7 +304,7 @@ TEST_CASE("SignalGenerator set_config takes effect immediately", "[core][signal_
 //     验证 reset 后连续调用 value() 确定性一致。
 // ---------------------------------------------------------------------------
 
-TEST_CASE("SignalGenerator σ=0 is purely deterministic", "[core][signal_generator]") {
+TEST_CASE("SignalGenerator sigma=0 is purely deterministic", "[core][signal_generator]") {
     SignalConfig cfg;
     cfg.amplitude = 2.5;
     cfg.frequency_hz = 5.0;
