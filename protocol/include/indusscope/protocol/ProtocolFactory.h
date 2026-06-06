@@ -35,15 +35,10 @@ public:
 
 private:
     ProtocolFactory() = default;
-
-    // Singleton: non-copyable, non-movable. Private and undefined — misuse causes compile/link error.
-    // 单例:不可拷贝/移动。私有声明且无定义,误用在编译或链接时报错。
-    // (Avoids = delete which the project guard flags as raw-delete; suppression via private declaration
-    //  is the pre-C++11 idiom and equally effective: copy ctor declared → compiler suppresses move too.)
-    // (避免 = delete 被项目守卫误判;私有声明是等效的 pre-C++11 惯用法:
-    //  声明拷贝构造→编译器同时压制移动构造。)
-    ProtocolFactory(const ProtocolFactory&);
-    ProtocolFactory& operator=(const ProtocolFactory&);
+    ProtocolFactory(const ProtocolFactory&)            = delete;
+    ProtocolFactory& operator=(const ProtocolFactory&) = delete;
+    ProtocolFactory(ProtocolFactory&&)                 = delete;
+    ProtocolFactory& operator=(ProtocolFactory&&)      = delete;
 
     std::map<std::string, Creator> m_creators; // name → factory function / 名称→工厂函数
 };
