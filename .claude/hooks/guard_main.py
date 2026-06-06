@@ -130,6 +130,7 @@ _RAW_DELETE_ARRAY_RE = re.compile(r'\bdelete\[\]')
 _WHITELIST_NEW_DELETE = [
     re.compile(r'\boperator\s+new\b'),      # operator new declaration
     re.compile(r'\boperator\s+delete\b'),   # operator delete declaration
+    re.compile(r'=\s*delete\b'),            # deleted function (= delete) is NOT manual deallocation / 删除函数,非手动释放
 ]
 
 

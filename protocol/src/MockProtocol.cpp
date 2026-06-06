@@ -1,4 +1,5 @@
 #include "indusscope/protocol/MockProtocol.h"
+#include "indusscope/protocol/ProtocolFactory.h"
 
 #include <algorithm>
 
@@ -63,5 +64,11 @@ std::size_t MockProtocol::poll(Reading* out, std::size_t max_n) {
     ++m_scan_k;
     return n;
 }
+
+// Self-register "mock" — called inside the namespace so MockProtocol is visible as an unqualified name.
+// 自注册 "mock"——在命名空间内调用,使 MockProtocol 以非限定名可见。
+// Only effective when this TU is linked with LINK_LIBRARY:WHOLE_ARCHIVE (see protocol/tests/CMakeLists.txt).
+// 仅当本 TU 以 WHOLE_ARCHIVE 方式链接时生效(参见 protocol/tests/CMakeLists.txt)。
+INDUSSCOPE_REGISTER_PROTOCOL("mock", MockProtocol)
 
 } // namespace indusscope::protocol
