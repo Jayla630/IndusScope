@@ -22,3 +22,15 @@ target_link_libraries(test_protocol_mock
 )
 
 catch_discover_tests(test_protocol_mock)
+
+add_executable(test_protocol_factory
+    test_protocol_factory.cpp
+)
+
+target_link_libraries(test_protocol_factory
+    PRIVATE
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,IndusScope::protocol>
+        Catch2::Catch2WithMain
+)
+
+catch_discover_tests(test_protocol_factory)
