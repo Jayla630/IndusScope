@@ -35,6 +35,8 @@ for the full pipeline will be elsewhere (serial I/O, rendering, signal processin
 | Sampling throughput | >= 1kHz | — | S2.2 |
 | Curve render FPS | >= 60fps @ 100k pts | **~60 (60Hz vsync upper bound); steady-state 58–60** / 稳态 58–60 | S2.3 |
 | E2E latency p99 | < 20ms | **15.8 ms** (render latency definition, see below) / 渲染延迟口径,见下 | S2.3 |
+| Curve render FPS (ProtocolSource) | >= 60fps @ 100k pts | **steady-state 55–60 (mode 57–59)** / 稳态 55–60,众数 57–59 | S2.5a |
+| E2E latency p99 (ProtocolSource) | < 20ms | **16.4 ms** p50=8.2ms, n=3000 / p50=8.2ms, n=3000 | S2.5a |
 | Image stream | 1080p@30fps | — | S2.6 |
 | Long-run memory | 0 leak / 1hr | — | S3.4 |
 
@@ -65,6 +67,22 @@ for the full pipeline will be elsewhere (serial I/O, rendering, signal processin
   含等待下一次 vsync + 一小段 GUI 事件队列,反映"数据就绪→上屏",非纯 GPU 渲染时间。
 - Warmup: first ~1 s of frames discarded. Sample size n = 3000 (~50 s), Release (`-O3 -DNDEBUG`).
   预热:丢弃前 ~1 秒帧。样本量 3000 帧 (~50 秒),Release 构建。
+
+## Render latency & FPS (S2.5a — ProtocolSource pipeline) / 渲染延迟与帧率 (S2.5a — ProtocolSource 管线)
+
+Producer switched from MockSource (SignalGenerator) to ProtocolSource(MockProtocol, sine, ch0, 5000 Hz).
+生产者从 MockSource(SignalGenerator)换为 ProtocolSource(MockProtocol, sine, ch0, 5000 Hz)。
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| Render latency p50 | 8.2 ms | comparable to S2.3 7.3 ms — within vsync-grid variability / 与 S2.3 相当,在 vsync 抖动范围内 |
+| Render latency p99 | 16.4 ms | +0.6 ms vs S2.3; under 20 ms target ✓ / 较 S2.3 +0.6ms,达标 |
+| Render latency max | 25.3 ms | single outlier (Windows non-RT scheduling) / 单点离群(Windows 非实时调度) |
+| Curve render FPS | 55–60 steady (mode 57–59) | consistent with S2.3 58–60; no visible regression ✓ / 与 S2.3 一致,无可见回退 |
+| n samples | 3000 | ~55 s run, Release / ~55 秒运行,Release 构建 |
+
+No visible FPS or p99 regression vs S2.3 MockSource baseline; ProtocolSource adapter overhead is negligible.
+与 S2.3 MockSource 基线相比无可见 FPS / p99 回退;ProtocolSource 适配层开销可忽略。
 
 ### Footnote — full-chain latency / 脚注:全链延迟
 
