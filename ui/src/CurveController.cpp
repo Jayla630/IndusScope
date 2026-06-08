@@ -2,10 +2,10 @@
 #include "indusscope/ui/AcquisitionWorker.h"
 
 #include "indusscope/core/MinMaxDownsampler.h"
-#include "indusscope/core/MockSource.h"
 #include "indusscope/core/RingBuffer.h"
 #include "indusscope/core/SamplePoint.h"
-#include "indusscope/core/SignalGenerator.h"
+#include "indusscope/protocol/ProtocolConfig.h"
+#include "indusscope/protocol/ProtocolFactory.h"
 
 #include <QGuiApplication>
 #include <QQuickWindow>
@@ -28,25 +28,31 @@ CurveController::CurveController(QObject* parent)
 {
     m_latencies.reserve(kLatencySamples);
 
-    using indusscope::core::MockSourceConfig;
-    using indusscope::core::SignalConfig;
-
     qDebug() << "[UI] CurveController ctor on thread" << QThread::currentThreadId();
 
     // --- Assemble AcquisitionWorker (producer half) 装配 AcquisitionWorker (生产者半场) ---
 
-    MockSourceConfig cfg;
-    cfg.sample_rate_hz      = kSampleRateHz;    // 5000 Hz
-    cfg.start_timestamp_ns  = 0;
-    cfg.signal_config.amplitude    = 1.0;
-    cfg.signal_config.frequency_hz = kSignalFreqHz;  // 10 Hz → 2 full periods in 0.2 s window
-                                                      // 10 Hz → 0.2 s 窗口内 2 个完整周期
-    cfg.signal_config.noise_stddev = 0.0;            // pure sine for visual verification
-                                                      // 纯正弦便于目视验证
+    // create("mock") returns nullptr only if MockProtocol.cpp TU was not linked
+    // (requires WHOLE_ARCHIVE in app/CMakeLists.txt — already set).
+    // create("mock") 仅在 MockProtocol.cpp TU 未被链接时返回 nullptr
+    // (需要 app/CMakeLists.txt 中的 WHOLE_ARCHIVE——已设置)。
+    auto proto = indusscope::protocol::ProtocolFactory::instance().create("mock");
+    Q_ASSERT_X(proto != nullptr, "CurveController", "ProtocolFactory::create(\"mock\") returned nullptr — "
+               "check WHOLE_ARCHIVE linkage of IndusScope::protocol");
+
+    indusscope::protocol::ProtocolConfig cfg;
+    cfg.params["waveform"]     = "sine";
+    cfg.params["channels"]     = "1";
+    cfg.params["period_ns"]    = "200000";  // 200 µs = 5000 Hz, matches kProducePerTick×kTimerIntervalMs
+                                            // 200 µs = 5000 Hz,对齐 kProducePerTick×kTimerIntervalMs
+    cfg.params["amplitude"]    = "1.0";
+    cfg.params["frequency_hz"] = "10.0";   // 10 Hz → 2 full periods in 0.2 s window
+                                            // 10 Hz → 0.2 s 窗口内 2 个完整周期
+    cfg.params["phase_rad"]    = "0.0";
 
     // No parent — moveToThread forbids parent QObject; lifecycle via deleteLater below.
     // 无 parent——moveToThread 禁止父 QObject;生命周期由下方的 deleteLater 管理。
-    m_worker = new AcquisitionWorker(*m_ringBuf, cfg);
+    m_worker = new AcquisitionWorker(std::move(proto), *m_ringBuf, cfg, /*channel=*/0);
 
     // Move worker (and its child QTimer) to dedicated thread.
     // 将 worker (及其子 QTimer) 移到专用线程。

@@ -3,6 +3,7 @@ add_library(indusscope_core STATIC
     src/SignalGenerator.cpp
     src/MockSource.cpp
     src/MinMaxDownsampler.cpp
+    src/ProtocolSource.cpp
 )
 add_library(IndusScope::core ALIAS indusscope_core)
 

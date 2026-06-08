@@ -136,16 +136,14 @@ private:
     // kBucketCount: ~screen width in pixels; produces ≤2×bucket_count render points.
     // kBucketCount: 屏宽量级像素数;产生 ≤2×桶数个渲染点。
     static constexpr int    kBucketCount      = 1000;
-    static constexpr int    kProducePerTick   = 80;    // 5000 Hz × 16 ms
-    static constexpr int    kRingBufCapacity  = 4096;  // 2^12, generous headroom
+    static constexpr int    kProducePerTick   = 80;    // 5000 Hz × 16 ms / 5000 Hz × 16 ms
+    static constexpr int    kRingBufCapacity  = 4096;  // 2^12, generous headroom / 充裕头寸
     static constexpr int    kTimerIntervalMs  = 16;    // ~60 fps
-    static constexpr double kSampleRateHz     = 5000.0;
-    static constexpr double kSignalFreqHz     = 10.0;
     static constexpr int    kLatencySamples   = 3000;  // ~50 s @ 60 fps; enough for stable p99 / ~50s@60fps,足够稳定 p99
 
     // --- Core data pipeline 数据管线 ---
 
-    /// Ring buffer: sink for MockSource, source for window pop.
+    /// Ring buffer: sink for ProtocolSource, source for window pop.
     /// 环形缓冲: MockSource 的下沉,滚动窗口的拉取源。
     /// Declared before m_thread so it is destroyed last (reverse decl order);
     /// combined with ~CurveController() quit→wait this is defense-in-depth against UAF.
@@ -228,7 +226,7 @@ private:
     /// 由 Qt 父子关系持有 (this),无需手动 delete。
     QTimer* m_timer = nullptr;
 
-    /// Producer worker — owns MockSource + its own QTimer; moved to m_thread via moveToThread.
+    /// Producer worker — owns ProtocolSource + its own QTimer; moved to m_thread via moveToThread.
     /// 生产者 worker——持有 MockSource + 自己的 QTimer;通过 moveToThread 移到 m_thread。
     /// Lifetime managed by connect(&m_thread, finished, m_worker, deleteLater) — no parent.
     /// 生命周期由 connect(&m_thread, finished, m_worker, deleteLater) 管理——无 parent。
