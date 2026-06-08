@@ -2,6 +2,7 @@
 #include "indusscope/protocol/ProtocolFactory.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace indusscope::protocol {
 
@@ -32,6 +33,33 @@ bool MockProtocol::configure(const ProtocolConfig& cfg) {
         catch (...) { /* keep default / 保留默认 */ }
     }
 
+    // Parse "waveform" — "ramp" (default) or "sine" / 解析波形模式,默认 ramp
+    it = cfg.params.find("waveform");
+    if (it != cfg.params.end()) {
+        m_waveform = (it->second == "sine") ? Waveform::Sine : Waveform::Ramp;
+    }
+
+    // Parse "amplitude" — default 1.0 / 解析正弦幅值,默认 1.0
+    it = cfg.params.find("amplitude");
+    if (it != cfg.params.end()) {
+        try { m_amplitude = std::stod(it->second); }
+        catch (...) { /* keep default / 保留默认 */ }
+    }
+
+    // Parse "frequency_hz" — default 10.0 / 解析正弦频率,默认 10.0 Hz
+    it = cfg.params.find("frequency_hz");
+    if (it != cfg.params.end()) {
+        try { m_frequency_hz = std::stod(it->second); }
+        catch (...) { /* keep default / 保留默认 */ }
+    }
+
+    // Parse "phase_rad" — default 0.0 / 解析正弦相位,默认 0.0 rad
+    it = cfg.params.find("phase_rad");
+    if (it != cfg.params.end()) {
+        try { m_phase_rad = std::stod(it->second); }
+        catch (...) { /* keep default / 保留默认 */ }
+    }
+
     return true;
 }
 
@@ -50,15 +78,24 @@ std::size_t MockProtocol::channelCount() const { return m_channels; }
 std::size_t MockProtocol::poll(Reading* out, std::size_t max_n) {
     if (!m_open) return 0;
 
-    std::size_t n  = std::min(m_channels, max_n);
+    // 2π — avoids non-standard M_PI (not in C++ standard, absent on MSVC without _USE_MATH_DEFINES)
+    // 2π——避开非标准 M_PI(不在 C++ 标准中,MSVC 不定义 _USE_MATH_DEFINES 时不存在)
+    constexpr double kTwoPi = 6.283185307179586;
+
+    std::size_t n   = std::min(m_channels, max_n);
     std::int64_t ts = m_start_ns + static_cast<std::int64_t>(m_scan_k) * m_period_ns;
 
     for (std::size_t c = 0; c < n; ++c) {
-        // Ramp: value = k*channels + c — deterministic, always finite, monotone across scans
-        // 斜坡:value = k*channels + c — 确定性、永远有限、跨扫描单调
         out[c].channel      = static_cast<std::uint32_t>(c);
-        out[c].value        = static_cast<double>(m_scan_k * m_channels + c);
         out[c].timestamp_ns = ts;
+        if (m_waveform == Waveform::Sine) {
+            const double t = static_cast<double>(ts) * 1e-9; // ns → s / 纳秒转秒
+            out[c].value = m_amplitude * std::sin(kTwoPi * m_frequency_hz * t + m_phase_rad);
+        } else {
+            // Ramp: value = k*channels + c — deterministic, always finite, monotone across scans
+            // 斜坡:value = k*channels + c — 确定性、永远有限、跨扫描单调
+            out[c].value = static_cast<double>(m_scan_k * m_channels + c);
+        }
     }
 
     ++m_scan_k;
