@@ -1,5 +1,6 @@
 #include "indusscope/protocol/ModbusProtocol.h"
 #include "indusscope/protocol/ProtocolFactory.h"
+#include "indusscope/protocol/TcpTransport.h"
 
 #include <algorithm>
 #include <array>
@@ -103,9 +104,12 @@ bool ModbusProtocol::configure(const ProtocolConfig& cfg) {
 }
 
 bool ModbusProtocol::open() {
-    // No transport injected (factory default-construct) — fail until S2.5c wires TcpTransport.
-    // 未注入 transport(工厂默认构造)—— 返回失败,S2.5c 接入 TcpTransport 后才可用。
-    if (!m_transport) return false;
+    // Build TcpTransport lazily when no transport was injected (factory-constructed path).
+    // 工厂构造路径(无注入 transport)时惰性建立 TcpTransport。
+    // Injection path (tests via FakeTransport) is untouched — hermetic tests stay green.
+    // 注入路径(测试用 FakeTransport)不变——hermetic 测试仍全绿。
+    if (!m_transport)
+        m_transport = std::make_unique<TcpTransport>(m_host, m_port, m_timeout_ms);
     return m_transport->open();
 }
 

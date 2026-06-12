@@ -324,15 +324,21 @@ TEST_CASE("modbus rejects byte count inconsistencies", "[modbus]") {
 TEST_CASE("modbus open close lifecycle delegates to transport", "[modbus]") {
     Reading out[4];
 
-    SECTION("default-constructed has no transport: open fails, poll returns 0 / 默认构造无 transport") {
+    SECTION("hostname endpoint fails inet_pton (v1 IPv4-literal only): open returns false / 主机名 endpoint 触 inet_pton 失败(v1 仅 IPv4 字面量):open 返 false") {
+        // S2.5c: open() now creates TcpTransport lazily; v1 only accepts IPv4 literals.
+        // S2.5c: open() 现在惰性建 TcpTransport;v1 只接受 IPv4 字面量。
+        // "localhost" is NOT an IPv4 literal → inet_pton returns 0 → open() closes socket and
+        // returns false immediately. Hermetic: no real socket connection is attempted.
+        // "localhost" 不是 IPv4 字面量 → inet_pton 返 0 → open() 关 socket 立即返 false。
+        // Hermetic:不发起真实 socket 连接。
         ModbusProtocol p;
         ProtocolConfig cfg;
-        cfg.endpoint = "10.0.0.1:502";
+        cfg.endpoint = "localhost:502";
         CHECK(p.configure(cfg));   // configure still parses normally / configure 仍正常解析
         CHECK_FALSE(p.open());
         CHECK_FALSE(p.isOpen());
         CHECK(p.poll(out, 4) == 0);
-        p.close();                 // close on transportless instance must not crash / 无 transport 时 close 不得崩
+        p.close();                 // idempotent close must not crash / 幂等 close 不得崩
     }
 
     SECTION("injected transport: open/isOpen/close delegate / 注入后三法委托 transport") {
