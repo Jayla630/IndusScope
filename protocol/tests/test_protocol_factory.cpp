@@ -1,12 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <array>
 #include "indusscope/protocol/ProtocolFactory.h"
-// NOTE: MockProtocol.h is intentionally NOT included here.
-// 注意:此处故意不 include MockProtocol.h。
-// Whole-archive sentinel: if MockProtocol.o is not pulled in by WHOLE_ARCHIVE,
-// "mock" will not be registered and tests 1-4 fail — proving the sentinel works.
-// whole-archive 哨兵:若 MockProtocol.o 未被 WHOLE_ARCHIVE 拉入,
-// "mock" 不会注册,测试 1-4 会失败——从而证明哨兵有效。
+// NOTE: MockProtocol.h / ModbusProtocol.h are intentionally NOT included here.
+// 注意:此处故意不 include MockProtocol.h / ModbusProtocol.h。
+// Whole-archive sentinel: this TU never references concrete protocol types, so their
+// object files are linked ONLY via WHOLE_ARCHIVE — drop it and the "mock"/"modbus"
+// registrations vanish, turning the sentinel cases red. That is the whole point.
+// whole-archive 哨兵:本 TU 不引用任何具体协议类型,其目标文件【仅】靠
+// WHOLE_ARCHIVE 链入——一旦去掉,"mock"/"modbus" 注册即消失,哨兵用例变红。
+// 这正是哨兵存在的意义。
 
 using indusscope::protocol::IDeviceProtocol;
 using indusscope::protocol::ProtocolConfig;
@@ -39,6 +41,22 @@ TEST_CASE("ProtocolFactory registeredNames contains mock (whole-archive sentinel
         if (n == "mock") { found = true; break; }
     }
     REQUIRE(found);
+}
+
+TEST_CASE("ProtocolFactory registeredNames contains modbus (whole-archive sentinel)", "[protocol][factory][modbus]") {
+    // If this fails: ModbusProtocol.o was dead-stripped — check LINK_LIBRARY:WHOLE_ARCHIVE.
+    // 若此处失败:ModbusProtocol.o 被裁剪——检查 LINK_LIBRARY:WHOLE_ARCHIVE 配置。
+    auto names = ProtocolFactory::instance().registeredNames();
+    bool found = false;
+    for (const auto& n : names) {
+        if (n == "modbus") { found = true; break; }
+    }
+    REQUIRE(found);
+
+    auto p = ProtocolFactory::instance().create("modbus");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->name() == "modbus");
+    REQUIRE_FALSE(p->open()); // factory instance has no transport until S2.5c / 工厂实例无 transport,S2.5c 接入前 open 失败
 }
 
 TEST_CASE("ProtocolFactory create mock returns non-null with correct name", "[protocol][factory]") {

@@ -405,15 +405,16 @@ TEST_CASE("modbus configure defaults and clamping", "[modbus]") {
     }
 }
 
-// --- Factory sentinel 工厂哨兵 ---
-// NOTE: ModbusProtocol.h IS included above, but creation goes through the factory by name;
-// if ModbusProtocol.o is dead-stripped (whole-archive off), registration never runs and
-// these checks go red — proving the sentinel works.
-// 注意:上方虽 include 了 ModbusProtocol.h,但创建走工厂按名查找;
-// 若 ModbusProtocol.o 被裁掉(whole-archive 关闭),注册不会执行,
-// 此处必红——以此证明哨兵有效。
+// --- Factory behavior 工厂行为 ---
+// NOTE: this binary references ModbusProtocol directly (injection tests), which pulls
+// ModbusProtocol.o into the link regardless of WHOLE_ARCHIVE — so this case can NOT
+// detect dead-stripping. The true sentinel lives in test_protocol_factory.cpp, which
+// never includes concrete protocol headers.
+// 注意:本二进制直接引用 ModbusProtocol(注入测试),无论是否 WHOLE_ARCHIVE,
+// ModbusProtocol.o 都会被链入——故本用例【无法】侦测 dead-strip。
+// 真正的哨兵在 test_protocol_factory.cpp,它从不 include 具体协议头。
 
-TEST_CASE("modbus factory sentinel create and registeredNames", "[modbus][factory]") {
+TEST_CASE("modbus factory create and registeredNames", "[modbus][factory]") {
     auto& factory = ProtocolFactory::instance();
 
     auto names = factory.registeredNames();

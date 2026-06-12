@@ -39,10 +39,13 @@ add_executable(test_protocol_modbus
     test_modbus_protocol.cpp
 )
 
-# WHOLE_ARCHIVE keeps ModbusProtocol.o alive so its self-registration runs —
-# the factory-sentinel test case guards against silent dead-stripping.
-# WHOLE_ARCHIVE 保住 ModbusProtocol.o,使其自注册得以执行——
-# 工厂哨兵测试用例防止其被静默裁剪。
+# WHOLE_ARCHIVE future-proofs registration here; in THIS binary ModbusProtocol.o is
+# pulled in anyway because tests reference the class directly (injection constructor).
+# The load-bearing dead-strip sentinel lives in test_protocol_factory, which never
+# references concrete protocol types.
+# WHOLE_ARCHIVE 在此仅作保险;本二进制的测试直接引用类(注入构造),
+# ModbusProtocol.o 本就会被链入。真正受力的防裁剪哨兵在 test_protocol_factory——
+# 它从不直接引用具体协议类型。
 target_link_libraries(test_protocol_modbus
     PRIVATE
         $<LINK_LIBRARY:WHOLE_ARCHIVE,IndusScope::protocol>
