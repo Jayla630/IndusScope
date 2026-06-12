@@ -40,3 +40,7 @@ add_subdirectory(protocol)
 add_subdirectory(core)
 add_subdirectory(ui)
 add_subdirectory(app)
+
+# --- Standalone CLI tools (no Qt dependency) ---
+# 独立 CLI 工具(无 Qt 依赖)
+add_subdirectory(tools/modbus_probe)
