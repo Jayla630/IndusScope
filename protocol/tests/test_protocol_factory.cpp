@@ -43,20 +43,15 @@ TEST_CASE("ProtocolFactory registeredNames contains mock (whole-archive sentinel
     REQUIRE(found);
 }
 
-TEST_CASE("ProtocolFactory registeredNames contains modbus (whole-archive sentinel)", "[protocol][factory][modbus]") {
-    // If this fails: ModbusProtocol.o was dead-stripped — check LINK_LIBRARY:WHOLE_ARCHIVE.
-    // 若此处失败:ModbusProtocol.o 被裁剪——检查 LINK_LIBRARY:WHOLE_ARCHIVE 配置。
-    auto names = ProtocolFactory::instance().registeredNames();
-    bool found = false;
-    for (const auto& n : names) {
-        if (n == "modbus") { found = true; break; }
-    }
-    REQUIRE(found);
-
+TEST_CASE("ProtocolFactory create modbus returns nullptr without loading plugin", "[protocol][factory][modbus]") {
+    // modbus is no longer statically built-in; it ships as a runtime-loaded plugin (S2.5d).
+    // modbus 已不再静态内建;现以运行时加载插件形式提供(S2.5d)。
+    // This binary links only IndusScope::protocol (no modbus_core, no protocol_modbus.dll),
+    // so create("modbus") must return nullptr — proving the static built-in is gone.
+    // 本二进制仅链接 IndusScope::protocol(不含 modbus_core,不含 protocol_modbus.dll),
+    // 故 create("modbus") 必须返回 nullptr——证明静态内建已移除。
     auto p = ProtocolFactory::instance().create("modbus");
-    REQUIRE(p != nullptr);
-    REQUIRE(p->name() == "modbus");
-    REQUIRE_FALSE(p->open()); // factory instance has no transport until S2.5c / 工厂实例无 transport,S2.5c 接入前 open 失败
+    REQUIRE(p == nullptr);
 }
 
 TEST_CASE("ProtocolFactory create mock returns non-null with correct name", "[protocol][factory]") {

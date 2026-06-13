@@ -1,5 +1,4 @@
 #include "indusscope/protocol/ModbusProtocol.h"
-#include "indusscope/protocol/ProtocolFactory.h"
 #include "indusscope/protocol/TcpTransport.h"
 
 #include <algorithm>
@@ -204,10 +203,8 @@ std::size_t ModbusProtocol::poll(Reading* out, std::size_t max_n) {
     return n;
 }
 
-// Self-register "modbus" — inside the namespace so ModbusProtocol is visible as an unqualified name.
-// 自注册 "modbus"——在命名空间内调用,使 ModbusProtocol 以非限定名可见。
-// Only effective when this TU is linked with LINK_LIBRARY:WHOLE_ARCHIVE (see protocol/tests/CMakeLists.txt).
-// 仅当本 TU 以 WHOLE_ARCHIVE 方式链接时生效(参见 protocol/tests/CMakeLists.txt)。
-INDUSSCOPE_REGISTER_PROTOCOL("modbus", ModbusProtocol)
+// "modbus" is no longer self-registered here — registration is performed at runtime by
+// PluginLoader after loading protocol_modbus.dll/.so via the C-ABI plugin contract.
+// "modbus" 不再此处自注册——注册由 PluginLoader 在运行时加载 protocol_modbus.dll/.so 后执行。
 
 } // namespace indusscope::protocol

@@ -2,19 +2,16 @@ add_executable(modbus_probe
     main.cpp
 )
 
-# WHOLE_ARCHIVE forces static-init TUs (INDUSSCOPE_REGISTER_PROTOCOL) to be pulled in,
-# enabling ProtocolFactory::create("modbus") to find its registration at runtime.
-# WHOLE_ARCHIVE 强制静态初始化 TU (INDUSSCOPE_REGISTER_PROTOCOL) 被链接,
-# 使 ProtocolFactory::create("modbus") 在运行时能找到注册项。
+# WHOLE_ARCHIVE pulls in MockProtocol.o (self-registration) and PluginLoader.o.
+# WHOLE_ARCHIVE 拉入 MockProtocol.o(自注册)和 PluginLoader.o。
+# modbus is no longer statically built-in; it is loaded at runtime via PluginLoader.
+# modbus 已不再静态内建;由 PluginLoader 在运行时加载。
 target_link_libraries(modbus_probe
     PRIVATE
         $<LINK_LIBRARY:WHOLE_ARCHIVE,IndusScope::protocol>
 )
 
-# ws2_32 is already transitively inherited via IndusScope::protocol PUBLIC ws2_32,
-# but listed explicitly here to make the dependency visible at the tool level.
-# ws2_32 已通过 IndusScope::protocol PUBLIC ws2_32 传递,
-# 此处显式列出以在工具层使依赖一目了然。
-if(WIN32)
-    target_link_libraries(modbus_probe PRIVATE ws2_32)
-endif()
+# ws2_32 not needed here: TcpTransport lives inside protocol_modbus.dll (loaded dynamically);
+# PluginLoader uses LoadLibrary which is in Kernel32 (auto-linked).
+# ws2_32 此处不需要:TcpTransport 在 protocol_modbus.dll 中(动态加载);
+# PluginLoader 使用 LoadLibrary,位于自动链接的 Kernel32 中。

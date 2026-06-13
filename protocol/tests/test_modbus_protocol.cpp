@@ -412,27 +412,17 @@ TEST_CASE("modbus configure defaults and clamping", "[modbus]") {
 }
 
 // --- Factory behavior 工厂行为 ---
-// NOTE: this binary references ModbusProtocol directly (injection tests), which pulls
-// ModbusProtocol.o into the link regardless of WHOLE_ARCHIVE — so this case can NOT
-// detect dead-stripping. The true sentinel lives in test_protocol_factory.cpp, which
-// never includes concrete protocol headers.
-// 注意:本二进制直接引用 ModbusProtocol(注入测试),无论是否 WHOLE_ARCHIVE,
-// ModbusProtocol.o 都会被链入——故本用例【无法】侦测 dead-strip。
-// 真正的哨兵在 test_protocol_factory.cpp,它从不 include 具体协议头。
+// S2.5d: INDUSSCOPE_REGISTER_PROTOCOL is removed from ModbusProtocol.cpp; modbus ships
+// as a runtime plugin (protocol_modbus.dll). ModbusProtocol.o is still linked here
+// (via modbus_core) to support direct-construction injection tests, but it is NOT
+// registered in the factory — registration only happens after PluginLoader::load().
+// S2.5d:INDUSSCOPE_REGISTER_PROTOCOL 已从 ModbusProtocol.cpp 移除;modbus 以运行时插件
+// (protocol_modbus.dll)形式提供。ModbusProtocol.o 仍链入(via modbus_core)以支持直接
+// 构造注入测试,但不在工厂中注册——注册仅在 PluginLoader::load() 调用后发生。
 
-TEST_CASE("modbus factory create and registeredNames", "[modbus][factory]") {
-    auto& factory = ProtocolFactory::instance();
-
-    auto names = factory.registeredNames();
-    bool found = false;
-    for (const auto& n : names) {
-        if (n == "modbus") { found = true; break; }
-    }
-    CHECK(found);
-
-    auto p = factory.create("modbus");
-    REQUIRE(p != nullptr);
-    CHECK(p->name() == "modbus");
-    CHECK_FALSE(p->isOpen()); // factory instance has no transport yet / 工厂实例尚无 transport
-    CHECK_FALSE(p->open());   // open fails until S2.5c TcpTransport / S2.5c 接入前 open 失败
+TEST_CASE("modbus factory create returns nullptr (modbus is plugin-only since S2.5d)", "[modbus][factory]") {
+    // No PluginLoader::load() call in this binary → factory has no "modbus" entry.
+    // 本二进制未调用 PluginLoader::load() → 工厂中无 "modbus" 注册项。
+    auto p = ProtocolFactory::instance().create("modbus");
+    CHECK(p == nullptr);
 }

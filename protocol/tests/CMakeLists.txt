@@ -39,16 +39,15 @@ add_executable(test_protocol_modbus
     test_modbus_protocol.cpp
 )
 
-# WHOLE_ARCHIVE future-proofs registration here; in THIS binary ModbusProtocol.o is
-# pulled in anyway because tests reference the class directly (injection constructor).
-# The load-bearing dead-strip sentinel lives in test_protocol_factory, which never
-# references concrete protocol types.
-# WHOLE_ARCHIVE 在此仅作保险;本二进制的测试直接引用类(注入构造),
-# ModbusProtocol.o 本就会被链入。真正受力的防裁剪哨兵在 test_protocol_factory——
-# 它从不直接引用具体协议类型。
+# Links modbus_core (STATIC) directly — hermetic FakeTransport tests need ModbusProtocol
+# and TcpTransport but must NOT depend on the protocol_modbus .dll.
+# 直接链接 modbus_core(STATIC)——hermetic FakeTransport 测试需要 ModbusProtocol 和
+# TcpTransport,但不得依赖 protocol_modbus .dll。
+# ws2_32 propagates transitively via modbus_core PUBLIC.
+# ws2_32 通过 modbus_core PUBLIC 传递继承。
 target_link_libraries(test_protocol_modbus
     PRIVATE
-        $<LINK_LIBRARY:WHOLE_ARCHIVE,IndusScope::protocol>
+        modbus_core
         Catch2::Catch2WithMain
 )
 
