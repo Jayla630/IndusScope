@@ -4,6 +4,7 @@ add_library(indusscope_core STATIC
     src/MockSource.cpp
     src/MinMaxDownsampler.cpp
     src/ProtocolSource.cpp
+    src/FramePool.cpp
 )
 add_library(IndusScope::core ALIAS indusscope_core)
 
