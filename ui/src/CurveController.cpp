@@ -32,23 +32,54 @@ CurveController::CurveController(QObject* parent)
 
     // --- Assemble AcquisitionWorker (producer half) 装配 AcquisitionWorker (生产者半场) ---
 
-    // create("mock") returns nullptr only if MockProtocol.cpp TU was not linked
-    // (requires WHOLE_ARCHIVE in app/CMakeLists.txt — already set).
-    // create("mock") 仅在 MockProtocol.cpp TU 未被链接时返回 nullptr
-    // (需要 app/CMakeLists.txt 中的 WHOLE_ARCHIVE——已设置)。
-    auto proto = indusscope::protocol::ProtocolFactory::instance().create("mock");
-    Q_ASSERT_X(proto != nullptr, "CurveController", "ProtocolFactory::create(\"mock\") returned nullptr — "
-               "check WHOLE_ARCHIVE linkage of IndusScope::protocol");
+    const QString mode     = qEnvironmentVariable("INDUSSCOPE_PROTOCOL", "mock");
+    const bool    useModbus = (mode == QStringLiteral("modbus"));
 
+    std::unique_ptr<indusscope::protocol::IDeviceProtocol> proto;
     indusscope::protocol::ProtocolConfig cfg;
-    cfg.params["waveform"]     = "sine";
-    cfg.params["channels"]     = "1";
-    cfg.params["period_ns"]    = "200000";  // 200 µs = 5000 Hz, matches kProducePerTick×kTimerIntervalMs
-                                            // 200 µs = 5000 Hz,对齐 kProducePerTick×kTimerIntervalMs
-    cfg.params["amplitude"]    = "1.0";
-    cfg.params["frequency_hz"] = "10.0";   // 10 Hz → 2 full periods in 0.2 s window
-                                            // 10 Hz → 0.2 s 窗口内 2 个完整周期
-    cfg.params["phase_rad"]    = "0.0";
+
+    if (useModbus) {
+        proto = indusscope::protocol::ProtocolFactory::instance().create("modbus");
+        if (!proto) {
+            // Plugin not loaded — graceful fallback to mock; caller sees qWarning.
+            // 插件未加载——优雅退化到 mock;调用方可见 qWarning。
+            qWarning() << "[UI] modbus plugin not registered — falling back to mock";
+        }
+    }
+
+    if (!proto) {
+        // --- Mock branch — untouched / Mock 分支——一字不动 ---
+        // create("mock") returns nullptr only if MockProtocol.cpp TU was not linked
+        // (requires WHOLE_ARCHIVE in app/CMakeLists.txt — already set).
+        // create("mock") 仅在 MockProtocol.cpp TU 未被链接时返回 nullptr
+        // (需要 app/CMakeLists.txt 中的 WHOLE_ARCHIVE——已设置)。
+        proto = indusscope::protocol::ProtocolFactory::instance().create("mock");
+        Q_ASSERT_X(proto != nullptr, "CurveController", "ProtocolFactory::create(\"mock\") returned nullptr — "
+                   "check WHOLE_ARCHIVE linkage of IndusScope::protocol");
+        cfg.params["waveform"]     = "sine";
+        cfg.params["channels"]     = "1";
+        cfg.params["period_ns"]    = "200000";  // 200 µs = 5000 Hz, matches kProducePerTick×kTimerIntervalMs
+                                                // 200 µs = 5000 Hz,对齐 kProducePerTick×kTimerIntervalMs
+        cfg.params["amplitude"]    = "1.0";
+        cfg.params["frequency_hz"] = "10.0";   // 10 Hz → 2 full periods in 0.2 s window
+                                                // 10 Hz → 0.2 s 窗口内 2 个完整周期
+        cfg.params["phase_rad"]    = "0.0";
+    } else {
+        // --- Modbus branch — additive only; mock path above is unchanged / Modbus 分支——additive;上方 mock 路径一字未动 ---
+        // scale/offset map raw register value into ±1.2 visible range.
+        // scale/offset 将原始寄存器值映射到 ±1.2 可见范围。
+        // Default scale=0.0002: reg 5000 → 1.0; reg 0 → 0.0 (fits in ±1.2).
+        // 默认 scale=0.0002: 寄存器 5000 → 1.0;寄存器 0 → 0.0 (在 ±1.2 内)。
+        cfg.endpoint                = qEnvironmentVariable("INDUSSCOPE_ENDPOINT", "127.0.0.1:502").toStdString();
+        cfg.params["unit_id"]       = "1";
+        cfg.params["start_address"] = "0";
+        cfg.params["quantity"]      = "1";
+        cfg.params["scale"]         = qEnvironmentVariable("INDUSSCOPE_SCALE",      "0.0002").toStdString();
+        cfg.params["offset"]        = qEnvironmentVariable("INDUSSCOPE_OFFSET",     "0.0"   ).toStdString();
+        cfg.params["timeout_ms"]    = qEnvironmentVariable("INDUSSCOPE_TIMEOUT_MS", "200"   ).toStdString();
+        qDebug() << "[UI] Modbus mode — endpoint:" << QString::fromStdString(cfg.endpoint)
+                 << "timeout:" << QString::fromStdString(cfg.params.at("timeout_ms")) << "ms";
+    }
 
     // No parent — moveToThread forbids parent QObject; lifecycle via deleteLater below.
     // 无 parent——moveToThread 禁止父 QObject;生命周期由下方的 deleteLater 管理。
@@ -73,6 +104,12 @@ CurveController::CurveController(QObject* parent)
             Qt::QueuedConnection);
     connect(this, &CurveController::stopRequested,
             m_worker, &AcquisitionWorker::stop,
+            Qt::QueuedConnection);
+
+    // Worker error → UI thread via queued connection; onWorkerError deduplicates.
+    // Worker 错误 → UI 线程经 queued connection;onWorkerError 负责去重。
+    connect(m_worker, &AcquisitionWorker::error,
+            this, &CurveController::onWorkerError,
             Qt::QueuedConnection);
 
     // --- Configure render timer (not started — QML calls start()) 配置渲染定时器 (不启动——QML 调用 start()) ---
@@ -175,10 +212,11 @@ CurveController::~CurveController()
 
 // --- Property accessors 属性访问器 ---
 
-QList<QPointF> CurveController::points() const { return m_points; }
+QList<QPointF> CurveController::points()     const { return m_points; }
 qreal CurveController::xMin()            const { return m_xMin; }
 qreal CurveController::xMax()            const { return m_xMax; }
 bool  CurveController::isRunning()       const { return m_running; }
+QString CurveController::deviceError()   const { return m_deviceError; }
 
 // --- Public slots 公开槽 ---
 
@@ -291,6 +329,16 @@ void CurveController::onTick()
     // 步骤 7: 发射信号使 QML 重新绑定。
     emit pointsChanged();
     emit xRangeChanged();
+}
+
+void CurveController::onWorkerError(const QString& message)
+{
+    // Dedup — only notify QML when the message actually changes.
+    // 去重——仅在消息实际变化时通知 QML。
+    if (message == m_deviceError)
+        return;
+    m_deviceError = message;
+    emit deviceErrorChanged();
 }
 
 } // namespace indusscope::ui
