@@ -94,3 +94,15 @@ target_link_libraries(test_core_synthetic_frame_source
 )
 
 catch_discover_tests(test_core_synthetic_frame_source)
+
+add_executable(test_core_latest_frame_buffer
+    test_core_latest_frame_buffer.cpp
+)
+
+target_link_libraries(test_core_latest_frame_buffer
+    PRIVATE
+        IndusScope::core
+        Catch2::Catch2WithMain
+)
+
+catch_discover_tests(test_core_latest_frame_buffer)
