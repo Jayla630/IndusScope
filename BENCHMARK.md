@@ -39,8 +39,26 @@ for the full pipeline will be elsewhere (serial I/O, rendering, signal processin
 | E2E latency p99 (ProtocolSource) | < 20ms | **16.4 ms** p50=8.2ms, n=3000 / p50=8.2ms, n=3000 | S2.5a |
 | Curve render FPS (S2.5d-2 mock mode) | >= 60fps @ 100k pts | **steady-state 58–60** — no regression vs S2.5a ✓ / 与 S2.5a 一致,无回退 | S2.5d-2 |
 | E2E latency p99 (S2.5d-2 mock mode) | < 20ms | **≤16.4 ms** — same pipeline, no change / 管线不变,预计持平 | S2.5d-2 |
-| Image stream | 1080p@30fps | — | S2.6 |
+| Image stream FPS | 1080p@30fps | — (lands in S2.6b-2 on-screen path) / 上屏路径出数 | S2.6b-2 |
 | Long-run memory | 0 leak / 1hr | — | S3.4 |
+
+## Image lane — correctness gate (S2.6b-1) / 图像那一路 — 正确性闸 (S2.6b-1)
+
+`LatestFrameBuffer` (latest-wins triple buffer) is correctness-gated, not a throughput
+number: a frame's FPS/latency is produced by the on-screen path in S2.6b-2. What this
+slice proves under a 2-thread stress (N = 5e5):
+`LatestFrameBuffer`(latest-wins 三缓冲)这刀是正确性闸,非吞吐数字;帧率/延迟由 S2.6b-2
+上屏路径出。本刀双线程压测(N = 5e5)证明:
+
+- No tearing, frame index monotonic non-regressing, producer never blocks (slow consumer
+  → drops, not stalls), zero allocation on the commit/takeLatest hot path.
+  无撕裂、帧号单调不退、生产者永不阻塞(慢消费者 → 丢帧而非阻塞)、commit/takeLatest 热路径零分配。
+- Memory ordering verified with **ThreadSanitizer** (Docker `gcc:13 -fsanitize=thread`):
+  `acq_rel` clean; a deliberate `relaxed` downgrade is caught as a data race (gate is real).
+  MinGW/Windows cannot run TSan; final memory-order check on real ARM is deferred to S3.2.
+  内存序用 **ThreadSanitizer** 验证(Docker `gcc:13 -fsanitize=thread`):`acq_rel` 干净;
+  故意降级 `relaxed` 被抓为 data race(闸有效)。MinGW/Windows 跑不了 TSan,真 ARM 上的
+  内存序最终验证挂 S3.2。
 
 ## Methodology
 
