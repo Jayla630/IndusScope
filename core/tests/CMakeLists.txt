@@ -82,3 +82,15 @@ target_link_libraries(test_core_frame_pool
 )
 
 catch_discover_tests(test_core_frame_pool)
+
+add_executable(test_core_synthetic_frame_source
+    test_synthetic_frame_source.cpp
+)
+
+target_link_libraries(test_core_synthetic_frame_source
+    PRIVATE
+        IndusScope::core
+        Catch2::Catch2WithMain
+)
+
+catch_discover_tests(test_core_synthetic_frame_source)
