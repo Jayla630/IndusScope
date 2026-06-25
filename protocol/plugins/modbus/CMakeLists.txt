@@ -14,3 +14,9 @@ target_link_libraries(protocol_modbus
 # Windows 上,PLUGIN_EXPORT = __declspec(dllexport) 处理符号可见性。
 # On POSIX, default ELF visibility is sufficient unless -fvisibility=hidden is set.
 # POSIX 上,默认 ELF 可见性已足够,除非设置了 -fvisibility=hidden。
+
+# Co-locate DLL with IndusScope.exe so applicationDirPath() lookup works without PATH tricks.
+# 将 DLL 与 IndusScope.exe 放在同一目录,使 applicationDirPath() 查找无需 PATH 技巧。
+set_target_properties(protocol_modbus PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

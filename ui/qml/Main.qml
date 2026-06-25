@@ -55,6 +55,28 @@ Window {
         function onPointsChanged() { lineSeries.replace(controller.points) }
     }
 
+    // Device offline banner — visible only when worker reports an error.
+    // 设备离线横幅——仅在 worker 报告错误时可见。
+    Rectangle {
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: 8
+        width: offlineText.implicitWidth + 24
+        height: offlineText.implicitHeight + 12
+        color: "#cc2200"
+        radius: 4
+        visible: controller.deviceError.length > 0
+
+        Text {
+            id: offlineText
+            anchors.centerIn: parent
+            text: "device offline"
+            color: "white"
+            font.pixelSize: 14
+            font.bold: true
+        }
+    }
+
     // Explicitly start the data pump — no hidden side effects in the constructor.
     // 显式启动数据泵——构造函数无隐藏副作用。
     Component.onCompleted: {

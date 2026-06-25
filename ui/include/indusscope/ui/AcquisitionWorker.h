@@ -82,8 +82,14 @@ private:
     // --- Constants 常量 ---
     // 16 ms interval × 80 points = 5000 Hz logical sample rate.
     // 16 ms 间隔 × 80 点 = 5000 Hz 逻辑采样率。
-    static constexpr int kTimerIntervalMs = 16;
-    static constexpr int kProducePerTick  = 80;
+    static constexpr int kTimerIntervalMs      = 16;
+    static constexpr int kProducePerTick       = 80;
+    // After kMaxConsecutiveFails zero-result acquire() calls, enter offline backoff.
+    // 连续 kMaxConsecutiveFails 次 acquire() 返 0 后进入离线退避。
+    static constexpr int kMaxConsecutiveFails  = 3;
+    // Slow timer interval while offline; one reconnect attempt per period.
+    // 离线期间的慢 timer 间隔;每周期一次重连尝试。
+    static constexpr int kReconnectIntervalMs  = 2000;
 
     // --- Producer 生产者 ---
 
@@ -102,6 +108,14 @@ private:
     /// One-shot guard for first-tick thread-id log — avoids log spam.
     /// 首 tick 线程 id 日志的一次性守卫——避免刷屏。
     bool m_loggedThread = false;
+
+    /// Consecutive acquire()-returns-0 counter; resets on any success.
+    /// 连续 acquire() 返 0 计数器;任何一次成功即清零。
+    int  m_failCount = 0;
+
+    /// True while in backoff (slow-timer reconnect) mode.
+    /// 处于退避(慢 timer 重连)模式时为真。
+    bool m_offline = false;
 };
 
 } // namespace indusscope::ui

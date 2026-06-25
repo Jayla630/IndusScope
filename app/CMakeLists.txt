@@ -16,3 +16,9 @@ target_link_libraries(IndusScope
         Qt6::Qml
         Qt6::Graphs
 )
+
+# Ensure protocol_modbus DLL is built before IndusScope.exe (runtime dlopen dep).
+# 确保 protocol_modbus DLL 在 IndusScope.exe 之前构建 (运行时 dlopen 依赖)。
+# IndusScope does NOT link protocol_modbus at build time — dlopen at runtime only.
+# IndusScope 不在构建时链接 protocol_modbus——仅在运行时 dlopen。
+add_dependencies(IndusScope protocol_modbus)

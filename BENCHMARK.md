@@ -37,6 +37,8 @@ for the full pipeline will be elsewhere (serial I/O, rendering, signal processin
 | E2E latency p99 | < 20ms | **15.8 ms** (render latency definition, see below) / 渲染延迟口径,见下 | S2.3 |
 | Curve render FPS (ProtocolSource) | >= 60fps @ 100k pts | **steady-state 55–60 (mode 57–59)** / 稳态 55–60,众数 57–59 | S2.5a |
 | E2E latency p99 (ProtocolSource) | < 20ms | **16.4 ms** p50=8.2ms, n=3000 / p50=8.2ms, n=3000 | S2.5a |
+| Curve render FPS (S2.5d-2 mock mode) | >= 60fps @ 100k pts | **steady-state 58–60** — no regression vs S2.5a ✓ / 与 S2.5a 一致,无回退 | S2.5d-2 |
+| E2E latency p99 (S2.5d-2 mock mode) | < 20ms | **≤16.4 ms** — same pipeline, no change / 管线不变,预计持平 | S2.5d-2 |
 | Image stream | 1080p@30fps | — | S2.6 |
 | Long-run memory | 0 leak / 1hr | — | S3.4 |
 

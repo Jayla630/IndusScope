@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QList>
 #include <QPointF>
+#include <QString>
 #include <QThread>
 #include <QtQml/qqmlregistration.h>
 
@@ -74,6 +75,12 @@ class CurveController : public QObject {
     /// 定时器是否正在运行。
     Q_PROPERTY(bool running READ isRunning NOTIFY runningChanged FINAL)
 
+    /// Last error message from AcquisitionWorker; empty string = no error.
+    /// 来自 AcquisitionWorker 的最新错误消息;空字符串 = 无错误。
+    /// Set by the worker thread via queued connection; safe to read from QML (UI thread).
+    /// 由 worker 线程经 queued connection 设置;从 QML(UI 线程)读取安全。
+    Q_PROPERTY(QString deviceError READ deviceError NOTIFY deviceErrorChanged FINAL)
+
 public:
     /// Construct and assemble RingBuffer, AcquisitionWorker, and QTimer.
     /// 构造并装配 RingBuffer、AcquisitionWorker 与 QTimer。
@@ -87,10 +94,11 @@ public:
 
     // --- Property accessors 属性访问器 ---
 
-    QList<QPointF> points() const;
-    qreal xMin()            const;
-    qreal xMax()            const;
-    bool  isRunning()       const;
+    QList<QPointF> points()      const;
+    qreal xMin()                 const;
+    qreal xMax()                 const;
+    bool  isRunning()            const;
+    QString deviceError()        const;
 
 public slots:
     /// Start the data pump timer.  Idempotent — no-op if already running.
@@ -114,6 +122,10 @@ signals:
     /// 运行状态切换时发射。
     void runningChanged();
 
+    /// Emitted when deviceError changes (set or cleared).
+    /// deviceError 变化时发射(设置或清除)。
+    void deviceErrorChanged();
+
     /// Control-plane signal — queued to worker thread to start production.
     /// 控制面信号——排队到 worker 线程启动生产。
     void startRequested();
@@ -126,6 +138,12 @@ private slots:
     /// Timer callback — executes the 7-step data flow.
     /// 定时器回调——执行七步数据流。
     void onTick();
+
+    /// Receives error messages from AcquisitionWorker via queued connection;
+    /// deduplicates and stores in m_deviceError, emits deviceErrorChanged().
+    /// 经 queued connection 接收 AcquisitionWorker 错误消息;
+    /// 去重后存入 m_deviceError,发射 deviceErrorChanged()。
+    void onWorkerError(const QString& message);
 
 private:
     // --- Constants 常量 ---
@@ -233,6 +251,10 @@ private:
     AcquisitionWorker* m_worker = nullptr;
 
     bool m_running = false;
+
+    /// Last error from AcquisitionWorker; empty = no error / device online.
+    /// 来自 AcquisitionWorker 的最新错误;空 = 无错误/设备在线。
+    QString m_deviceError;
 };
 
 } // namespace indusscope::ui
