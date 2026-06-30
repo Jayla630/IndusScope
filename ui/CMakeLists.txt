@@ -25,12 +25,16 @@ target_link_libraries(indusscope_ui
 qt_add_qml_module(indusscope_ui
     URI "IndusScope.Ui"
     VERSION 1.0
-    QML_FILES qml/Main.qml
+    QML_FILES
+        qml/Main.qml
+        qml/FrameWindow.qml
     SOURCES
         include/indusscope/ui/AcquisitionWorker.h
         src/AcquisitionWorker.cpp
         include/indusscope/ui/CurveController.h
         src/CurveController.cpp
+        include/indusscope/ui/FrameView.h
+        src/FrameView.cpp
     DEPENDENCIES
         QtQuick
         QtGraphs

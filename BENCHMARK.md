@@ -39,7 +39,8 @@ for the full pipeline will be elsewhere (serial I/O, rendering, signal processin
 | E2E latency p99 (ProtocolSource) | < 20ms | **16.4 ms** p50=8.2ms, n=3000 / p50=8.2ms, n=3000 | S2.5a |
 | Curve render FPS (S2.5d-2 mock mode) | >= 60fps @ 100k pts | **steady-state 58–60** — no regression vs S2.5a ✓ / 与 S2.5a 一致,无回退 | S2.5d-2 |
 | E2E latency p99 (S2.5d-2 mock mode) | < 20ms | **≤16.4 ms** — same pipeline, no change / 管线不变,预计持平 | S2.5d-2 |
-| Image stream FPS | 1080p@30fps | — (lands in S2.6b-2 on-screen path) / 上屏路径出数 | S2.6b-2 |
+| Image stream FPS | 1080p@30fps | **30–31 steady @ 1080p** (single-thread first light) / 单线程首光,稳态 30–31 | S2.6b-2 |
+| Image stream memory | no growth | **168.3 MB flat, ~80 s @ 1080p@30fps** (per-frame texture, no leak) / 每帧建纹理不涨 | S2.6b-2 |
 | Long-run memory | 0 leak / 1hr | — | S3.4 |
 
 ## Image lane — correctness gate (S2.6b-1) / 图像那一路 — 正确性闸 (S2.6b-1)
@@ -59,6 +60,43 @@ slice proves under a 2-thread stress (N = 5e5):
   内存序用 **ThreadSanitizer** 验证(Docker `gcc:13 -fsanitize=thread`):`acq_rel` 干净;
   故意降级 `relaxed` 被抓为 data race(闸有效)。MinGW/Windows 跑不了 TSan,真 ARM 上的
   内存序最终验证挂 S3.2。
+
+## Image stream — on-screen FPS & memory (S2.6b-2) / 图像那一路 — 上屏帧率与内存 (S2.6b-2)
+
+First light of the image lane on screen: `FrameView` (custom `QQuickItem`) drives
+`SyntheticFrameSource` from a GUI-thread `QTimer` and uploads each frame via
+`QSGSimpleTextureNode` + `createTextureFromImage`. Single-threaded (worker offload is b-3).
+图像那一路首次上屏:`FrameView`(自定义 `QQuickItem`)由 GUI 线程 `QTimer` 驱动
+`SyntheticFrameSource`,每帧经 `QSGSimpleTextureNode` + `createTextureFromImage` 上传。
+单线程(挪 worker 是 b-3)。
+
+| Metric | Target | Measured | Notes |
+|--------|--------|----------|-------|
+| Frame FPS @ 1080p | 30 fps | **30–31 steady** (~85 s, no dip) / 稳态 30–31,无掉帧 | render fps == production rate, RGBA8888 1920×1080 |
+| Frame FPS @ 720p | 30 fps | **30–31 steady** | same code path / 同码路 |
+| Process RSS @ 1080p | no growth | **168.3 MB flat** over ~80 s (range 168.1–168.4) / 80s 持平 | headline: validates `setOwnsTexture` frees prior texture each frame |
+| Startup RSS spike | — | 431 MB → settles to 168 MB by t=5 s / 启动尖峰后回落 | one-time RHI/D3D + first-texture init, not a leak / 一次性 RHI/D3D 初始化,非泄漏 |
+
+**Timer type matters / 定时器类型要紧:** the default `Qt::CoarseTimer` coalesces a 33 ms
+interval to the ~15.6 ms Windows system tick, snapping it to 46.8 ms (≈21 fps). The pump uses
+`Qt::PreciseTimer` to hold ~30 fps. / 默认 `Qt::CoarseTimer` 把 33ms 对齐到 ~15.6ms 系统 tick,
+顶成 46.8ms(≈21fps);帧泵用 `Qt::PreciseTimer` 才稳住 ~30fps。
+
+**Per-frame texture cost / 每帧建纹理开销:** this slice rebuilds a GPU texture every frame
+(`createTextureFromImage`), proven smooth at 1080p@30fps on desktop. If a real-machine/ARM run
+later shows per-frame upload stalls, the in-place QRhi upload path (reuse one texture) is the
+filed optimization slice. / 本刀每帧重建 GPU 纹理,桌面 1080p@30fps 已证顺滑;若日后真机/ARM
+测出每帧上传卡顿,复用单张纹理的 QRhi 原地上传是已挂账的优化刀。
+
+### Methodology / 方法
+- Launch `INDUSSCOPE_VIEW=frame`; `INDUSSCOPE_FRAME_W/H=1920/1080` for the 1080p run.
+  Window forced foreground each sample so the threaded render loop stays exposed (an occluded
+  Qt Quick window correctly stops swapping → render fps 0 while production continues).
+  启动 `INDUSSCOPE_VIEW=frame`;1080p 跑加 `INDUSSCOPE_FRAME_W/H=1920/1080`。每次采样把窗口
+  置前,使线程化渲染循环保持 exposed(被遮挡的 Qt Quick 窗口会正确停止 swap → 渲染 fps 0 而生产继续)。
+- FPS from per-second `frameSwapped` count (queued onto GUI thread). RSS via `Get-Process
+  WorkingSet64`, sampled every 5 s over ~80 s. Release (`-O3 -DNDEBUG`).
+  FPS 取每秒 `frameSwapped` 计数(queued 到 GUI 线程);RSS 用 `Get-Process WorkingSet64`,每 5 秒采样,共 ~80 秒。Release 构建。
 
 ## Methodology
 

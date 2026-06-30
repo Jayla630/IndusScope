@@ -58,11 +58,20 @@ int main(int argc, char *argv[])
         []() { QCoreApplication::exit(EXIT_FAILURE); },
         Qt::QueuedConnection);
 
+    // View selection via env: INDUSSCOPE_VIEW=frame loads the S2.6b FrameView window;
+    // anything else (default) loads the curve UI. Keeps the two fully isolated so the
+    // frame demo can be recorded standalone without disturbing the curve path.
+    // 视图选择(env):INDUSSCOPE_VIEW=frame 加载 S2.6b FrameView 窗口;其余(默认)
+    // 加载曲线 UI。二者完全隔离,使帧 demo 可独立录屏而不扰动曲线那路。
+    const QString view = qEnvironmentVariable("INDUSSCOPE_VIEW", "curve");
+
     // Module URI: "IndusScope.Ui" matches qt_add_qml_module URI in ui/CMakeLists.txt.
     // Requires QTP0001 NEW so the module is at :/qt/qml/ (default QML import path).
     // 模块 URI: "IndusScope.Ui" 对齐 ui/CMakeLists.txt 中 qt_add_qml_module 的 URI。
     // 需要 QTP0001 NEW,将模块放在 :/qt/qml/ (默认 QML 导入路径)。
-    engine.loadFromModule("IndusScope.Ui", "Main");
+    engine.loadFromModule("IndusScope.Ui",
+                          view == QStringLiteral("frame") ? QStringLiteral("FrameWindow")
+                                                          : QStringLiteral("Main"));
 
     return app.exec();
 }
